@@ -1,0 +1,31 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# macOS
+.DS_Store
+
+# Generated experiment data
+experiment-a-results/
+stage2/stage2-runs/
+
+# Local/runtime files
+*.log
+
+# Containerlab generated/runtime files
+clab-*/.state.clab.yaml
+clab-*/ansible-inventory.yml
+clab-*/authorized_keys
+clab-*/nornir-simple-inventory.yml
+clab-*/topology-data.json
+
+# Local Stage 2 generated state
+stage2/static/dataset-history.json

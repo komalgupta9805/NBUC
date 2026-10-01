@@ -1,0 +1,4 @@
+.env
+stage2-runs/
+__pycache__/
+recipes/__pycache__/
