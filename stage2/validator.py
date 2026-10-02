@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import settings
-from .registry import RECIPE_PARAMETERS, RECIPE_REGISTRY, TOPOLOGY_REGISTRY
+from .registry import RECIPE_ALIASES, RECIPE_PARAMETERS, RECIPE_REGISTRY, TOPOLOGY_REGISTRY
 
 
 @dataclass
@@ -21,6 +21,8 @@ def validate(raw: object) -> ValidationResult:
     if raw.get("out_of_scope") or raw.get("topology") not in TOPOLOGY_REGISTRY:
         return ValidationResult("out_of_scope", "osvbng is the only supported topology; this request did not match it.")
     recipe = raw.get("recipe")
+    if isinstance(recipe, str):
+        recipe = RECIPE_ALIASES.get(recipe, recipe)
     if raw.get("needs_clarification") or recipe is None:
         return ValidationResult("needs_clarification", str(raw.get("clarification_question") or "Which experiment do you need: session binding, scaling, disconnect/reconnect, or RADIUS accounting?"), options=["Session binding", "Scaling", "Disconnect/reconnect", "RADIUS accounting"])
     if recipe not in RECIPE_REGISTRY:

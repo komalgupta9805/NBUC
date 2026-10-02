@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from importlib import import_module
 import shutil
 import subprocess
 import tarfile
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import settings
+from .registry import RECIPE_REGISTRY
 
 
 class JobManager:
@@ -65,7 +67,17 @@ class JobManager:
         job = self.jobs[job_id]
         job.update(status="running", stage="preparing_testbed", progress_pct=10)
         try:
-            from .recipes.ipoe_bind import execute
+            recipe = job["intent"].get("recipe")
+            recipe_definition = RECIPE_REGISTRY.get(recipe)
+            if not recipe_definition:
+                raise RuntimeError(f"Recipe {recipe!r} is not allowlisted for execution.")
+            if recipe_definition["status"] != "implemented":
+                raise RuntimeError(f"Recipe {recipe!r} is registered but not implemented.")
+            module_name = recipe_definition["module"]
+            executor_module = import_module(f".{module_name}", package=__package__)
+            execute = getattr(executor_module, "execute", None)
+            if not callable(execute):
+                raise RuntimeError(f"Recipe executor {module_name!r} does not expose execute().")
             job.update(stage="running_experiment", progress_pct=30)
             result = execute(
                 settings,
@@ -89,7 +101,7 @@ class JobManager:
         directory: Path = job["directory"]
         artifacts = directory / "artifacts"
         artifacts.mkdir(exist_ok=True)
-        metadata = {"request_id": job["job_id"], "user_request_text": job["user_request"], "normalized_intent": job["intent"], "topology": "osvbng", "recipe": "ipoe-bind", "parameters": job["intent"]["parameters"], "timestamp_start": result.get("timestamp_start"), "timestamp_end": datetime.now(UTC).isoformat(), "testbed_host_env_var": "TESTBED_HOST", "experiment_version": "experiment-a", **result, "artifact_paths": {"dataset": "dataset.tar.gz", "artifacts_dir": "artifacts/"}}
+        metadata = {"request_id": job["job_id"], "user_request_text": job["user_request"], "normalized_intent": job["intent"], "topology": "osvbng", "recipe": job["intent"]["recipe"], "parameters": job["intent"]["parameters"], "timestamp_start": result.get("timestamp_start"), "timestamp_end": datetime.now(UTC).isoformat(), "testbed_host_env_var": "TESTBED_HOST", "experiment_version": "experiment-a", **result, "artifact_paths": {"dataset": "dataset.tar.gz", "artifacts_dir": "artifacts/"}}
         (directory / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
         with tarfile.open(directory / "dataset.tar.gz", "w:gz") as archive:
             archive.add(directory / "metadata.json", arcname="metadata.json")

@@ -17,6 +17,13 @@ RECIPE_REGISTRY = {
     "radius-acct": {"status": "implementation_required", "module": "recipes.radius_acct"},
 }
 
+# Public aliases are normalized before validation; the PRD's canonical ID for
+# accounting is ``radius-acct``.
+RECIPE_ALIASES = {
+    "ipoe-acct": "radius-acct",
+    "ipoe_acct": "radius-acct",
+}
+
 RECIPE_PARAMETERS = {
     "ipoe-bind": {
         "sessions": {"default": 20, "minimum": 10, "maximum": 700, "required": True},
