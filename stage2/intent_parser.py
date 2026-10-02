@@ -31,7 +31,7 @@ def deterministic_intent(message: str) -> dict[str, Any]:
     text = message.lower()
     if not any(token in text for token in ("bng", "ipoe", "dhcp", "subscriber", "radius")):
         return {"topology": None, "recipe": None, "confidence": "high", "parameters": {}, "needs_clarification": False, "clarification_question": None, "out_of_scope": True}
-    if "radius" in text:
+    if any(token in text for token in ("radius", "accounting", "acct")):
         recipe = "radius-acct"
     elif any(token in text for token in ("flap", "reconnect", "disconnect")):
         recipe = "ipoe-flap"
