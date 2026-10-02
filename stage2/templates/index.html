@@ -4,18 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>BNG Dataset Generator</title>
-  <link rel="stylesheet" href="/static/app.css?v=5">
+  <link rel="stylesheet" href="/static/app.css?v=6">
 </head>
 <body>
   <main class="app-shell">
     <aside class="sidebar">
       <div class="brand">BNG <span>DATASETS</span></div>
-      <button class="new-chat" type="button" onclick="location.reload()">＋ New request</button>
+      <button id="new-request" class="new-chat" type="button">＋ New request</button>
       <nav aria-label="Workspace navigation">
-        <p>RECENT</p>
-        <a class="active" href="#">Dataset generation</a>
-        <a href="#">Experiment history</a>
-        <a href="#">Testbed status</a>
+        <p>WORKSPACE</p>
+        <button class="workspace-nav active" type="button" data-view="generation">Dataset generation</button>
+        <button class="workspace-nav" type="button" data-view="experiments">Experiment history</button>
+        <button class="workspace-nav" type="button" data-view="testbed">Testbed status</button>
+        <button id="recipes-toggle" class="workspace-nav" type="button" data-view="recipes" aria-expanded="false" aria-controls="recipe-selector">Recipes</button>
+        <div id="recipe-selector" class="recipe-selector" role="menu" aria-label="Select a recipe" hidden>
+          <span class="recipe-selector-loading">Loading recipes…</span>
+        </div>
       </nav>
       <section class="dataset-nav" aria-label="Generated datasets">
         <p>DATASETS</p>
@@ -23,7 +27,7 @@
           <span class="history-empty">No completed datasets yet</span>
         </div>
       </section>
-      <div class="sidebar-footer">osVBNG testbed<br><small>Connected workspace</small></div>
+      <div class="sidebar-footer">osVBNG testbed<br><small id="connection-status">Checking workspace status…</small></div>
     </aside>
     <section class="workspace">
       <header>
@@ -40,6 +44,6 @@
       </form>
     </section>
   </main>
-  <script src="/static/app.js?v=5"></script>
+  <script src="/static/app.js?v=14"></script>
 </body>
 </html>

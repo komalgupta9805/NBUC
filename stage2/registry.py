@@ -11,10 +11,38 @@ TOPOLOGY_REGISTRY = {
 }
 
 RECIPE_REGISTRY = {
-    "ipoe-bind": {"status": "implemented", "module": "recipes.ipoe_bind"},
-    "ipoe-scale": {"status": "implementation_required", "module": "recipes.ipoe_scale"},
-    "ipoe-flap": {"status": "implementation_required", "module": "recipes.ipoe_flap"},
-    "radius-acct": {"status": "implementation_required", "module": "recipes.radius_acct"},
+    "ipoe-bind": {
+        "status": "implemented",
+        "module": "recipes.ipoe_bind",
+        "timeout_setting": "default_job_timeout_seconds",
+        "display_name": "IPoE Bind",
+        "description": "Dual-stack IPoE session establishment dataset.",
+        "artifacts": ["Dataset", "Access PCAP", "Blaster report", "Prometheus metrics", "Session dump"],
+    },
+    "ipoe-scale": {
+        "status": "implemented",
+        "module": "recipes.ipoe_scale",
+        "timeout_setting": "scale_job_timeout_seconds",
+        "display_name": "IPoE Scale",
+        "description": "Session setup-rate sweep toward a target load with a CPU safety limit.",
+        "artifacts": ["Time-series CSV", "CPU and setup-rate metrics"],
+    },
+    "ipoe-flap": {
+        "status": "implementation_required",
+        "module": "recipes.ipoe_flap",
+        "timeout_setting": "default_job_timeout_seconds",
+        "display_name": "IPoE Flap",
+        "description": "Subscriber disconnect and reconnect cycle analysis.",
+        "artifacts": ["Access PCAP", "Counters CSV", "Session timeline CSV"],
+    },
+    "radius-acct": {
+        "status": "implementation_required",
+        "module": "recipes.radius_acct",
+        "timeout_setting": "default_job_timeout_seconds",
+        "display_name": "RADIUS Accounting",
+        "description": "RADIUS interim-accounting capture after subscriber bring-up.",
+        "artifacts": ["RADIUS accounting PCAP"],
+    },
 }
 
 # Public aliases are normalized before validation; the PRD's canonical ID for

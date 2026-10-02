@@ -33,6 +33,8 @@ class Settings:
     max_sessions_hard_cap: int = int(os.getenv("MAX_SESSIONS_HARD_CAP", "700"))
     default_job_timeout_seconds: int = int(os.getenv("DEFAULT_JOB_TIMEOUT_SECONDS", "600"))
     scale_job_timeout_seconds: int = int(os.getenv("SCALE_JOB_TIMEOUT_SECONDS", "1200"))
+    max_preflight_recovery_attempts: int = int(os.getenv("MAX_PREFLIGHT_RECOVERY_ATTEMPTS", "2"))
+    preflight_recovery_wait_seconds: int = int(os.getenv("PREFLIGHT_RECOVERY_WAIT_SECONDS", "30"))
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
     jobs_output_dir: Path = Path(os.getenv("JOBS_OUTPUT_DIR", str(ROOT / "stage2-runs")))

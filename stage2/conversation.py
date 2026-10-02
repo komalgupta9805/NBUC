@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 @dataclass
 class Conversation:
     pending_intent: dict | None = None
+    selected_recipe: str | None = None
+    selected_topology: str | None = None
     history: list[dict] = field(default_factory=list)
 
 
