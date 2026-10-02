@@ -46,14 +46,27 @@ function resultContext(detail) {
   const config = metadata.config || {};
   const parameters = detail.parameters || {};
   const summary = detail.summary || {};
+  const timestampStart = metadata.timestamp_start || detail.timestamp_start;
+  const timestampEnd = metadata.timestamp_end || metadata.timestamp || detail.timestamp_end || detail.timestamp_start;
+  const started = timestampStart ? new Date(timestampStart) : null;
+  const ended = timestampEnd ? new Date(timestampEnd) : null;
+  const durationSeconds = started && ended && !Number.isNaN(started.valueOf()) && !Number.isNaN(ended.valueOf())
+    ? Math.max(0, Math.round((ended - started) / 1000)) : undefined;
   return {
     recipe: metadata.recipe || detail.recipe || "ipoe-bind",
     sessions: config.session_count || config.sessions || detail.session_count || parameters.sessions || detail.requested_sessions,
-    timestamp: metadata.timestamp_end || metadata.timestamp || detail.timestamp_end || detail.timestamp_start,
+    timestamp: timestampEnd,
     success: summary.success_rate ?? detail.success_rate ?? (detail.failed_sessions === 0 ? 100 : undefined),
     p50: summary.dhcp_p50_ms ?? detail.dhcp_p50_ms ?? detail.setup_p50_ms,
     p95: summary.dhcp_p95_ms ?? detail.dhcp_p95_ms ?? detail.setup_p95_ms,
-    cpu: summary.peak_cpu_percent ?? detail.peak_cpu_percent ?? detail.peak_bng_cpu
+    cpu: summary.peak_cpu_percent ?? detail.peak_cpu_percent ?? detail.peak_bng_cpu,
+    established: detail.established_sessions_blaster ?? detail.established_sessions,
+    failed: detail.failed_sessions,
+    offeredRate: parameters.offered_rate ?? config.offered_rate,
+    durationSeconds,
+    topology: metadata.topology || detail.topology || detail.normalized_intent?.topology,
+    faults: detail.fault_labels_observed || summary.fault_labels_observed || [],
+    artifacts: detail.artifact_paths || metadata.artifact_paths || {}
   };
 }
 
@@ -74,6 +87,10 @@ function renderResult(detail, jobId, replace = false) {
   title.textContent = "Dataset generation completed";
   const description = document.createElement("p");
   description.textContent = `${recipeLabel(result.recipe)} · ${result.sessions || "—"} sessions`;
+  const completedAt = document.createElement("span");
+  completedAt.className = "completion-time";
+  const completedTime = formatTimestamp(result.timestamp);
+  completedAt.textContent = completedTime ? `Completed · ${completedTime}` : "Completed";
   const metrics = document.createElement("div");
   metrics.className = "metrics";
   metrics.append(
@@ -82,6 +99,13 @@ function renderResult(detail, jobId, replace = false) {
     metric("DHCP p95", result.p95 ? `${result.p95} ms` : "—"),
     metric("Peak CPU", result.cpu ? `${result.cpu}%` : "—")
   );
+  const runSummary = document.createElement("p");
+  runSummary.className = "run-summary";
+  const summaryBits = [];
+  if (result.established !== undefined && result.sessions) summaryBits.push(`${result.established}/${result.sessions} established`);
+  if (result.durationSeconds !== undefined) summaryBits.push(`${result.durationSeconds} sec`);
+  if (result.offeredRate !== undefined) summaryBits.push(`${result.offeredRate} sessions/sec`);
+  runSummary.textContent = summaryBits.length ? summaryBits.join("  ·  ") : "Run summary unavailable";
   const actions = document.createElement("div");
   actions.className = "completion-actions";
   [["Download dataset", `/api/jobs/${encodeURIComponent(jobId)}/dataset`], ["Download artifacts", `/api/jobs/${encodeURIComponent(jobId)}/artifacts`]].forEach(([label, href]) => {
@@ -91,7 +115,47 @@ function renderResult(detail, jobId, replace = false) {
     link.setAttribute("download", "");
     actions.append(link);
   });
-  card.append(title, description, metrics, actions);
+  const detailsButton = document.createElement("button");
+  detailsButton.type = "button";
+  detailsButton.className = "details-toggle";
+  detailsButton.textContent = "View details";
+  detailsButton.setAttribute("aria-expanded", "false");
+  const details = document.createElement("section");
+  details.className = "run-details";
+  details.hidden = true;
+  const detailsTitle = document.createElement("h2");
+  detailsTitle.textContent = "Run details";
+  const detailGrid = document.createElement("dl");
+  const addDetail = (label, value) => {
+    if (value === undefined || value === null || value === "") return;
+    const term = document.createElement("dt");
+    const definition = document.createElement("dd");
+    term.textContent = label;
+    definition.textContent = value;
+    detailGrid.append(term, definition);
+  };
+  addDetail("Recipe", recipeLabel(result.recipe));
+  addDetail("Topology", result.topology);
+  addDetail("Requested sessions", result.sessions);
+  addDetail("Established sessions", result.established);
+  addDetail("Failed sessions", result.failed);
+  addDetail("Offered rate", result.offeredRate === undefined ? undefined : `${result.offeredRate}/s`);
+  addDetail("Peak CPU", result.cpu === undefined ? undefined : `${result.cpu}%`);
+  addDetail("DHCP p50", result.p50 === undefined ? undefined : `${result.p50} ms`);
+  addDetail("DHCP p95", result.p95 === undefined ? undefined : `${result.p95} ms`);
+  addDetail("Faults observed", Array.isArray(result.faults) && result.faults.length ? result.faults.join(", ") : "None observed");
+  addDetail("Run ID", jobId);
+  const artifacts = Object.keys(result.artifacts).length ? Object.keys(result.artifacts).map((name) => name.replaceAll("_", " ")).join(", ") : undefined;
+  addDetail("Artifacts", artifacts);
+  details.append(detailsTitle, detailGrid);
+  detailsButton.addEventListener("click", () => {
+    const expanded = detailsButton.getAttribute("aria-expanded") === "true";
+    detailsButton.setAttribute("aria-expanded", String(!expanded));
+    detailsButton.textContent = expanded ? "View details" : "Hide details";
+    details.hidden = expanded;
+  });
+  actions.append(detailsButton);
+  card.append(title, description, completedAt, metrics, runSummary, actions, details);
   messages.append(card);
   messages.scrollTop = messages.scrollHeight;
 }
@@ -101,4 +165,8 @@ const progressStyles = document.createElement("link");
 progressStyles.rel = "stylesheet";
 progressStyles.href = "/static/progress.css?v=1";
 document.head.append(progressStyles);
+const resultDetailsStyles = document.createElement("link");
+resultDetailsStyles.rel = "stylesheet";
+resultDetailsStyles.href = "/static/result-details.css?v=1";
+document.head.append(resultDetailsStyles);
 void initialiseHistory();
