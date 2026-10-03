@@ -42,6 +42,53 @@ def validate_remote_project(settings: Settings, log_path: Path | None = None) ->
         raise RuntimeError(f"Remote project verification failed for {script}{suffix}")
 
 
+def run_remote_preflight(
+    settings: Settings,
+    log_path: Path,
+    timeout_seconds: int,
+) -> subprocess.CompletedProcess[str]:
+    """Run Experiment A's authoritative preflight on the remote testbed."""
+    if not settings.testbed_project_path:
+        raise RuntimeError("TESTBED_PROJECT_PATH must be configured.")
+    experiment = f"{settings.testbed_project_path}/experiment-a"
+    command = _ssh_base(settings) + [
+        f"cd {shlex.quote(experiment)} && ./preflight.sh"
+    ]
+    with log_path.open("a", encoding="utf-8") as handle:
+        return subprocess.run(
+            command,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+
+
+def recover_remote_testbed(
+    settings: Settings,
+    log_path: Path,
+    timeout_seconds: int,
+) -> subprocess.CompletedProcess[str]:
+    """Use the approved graceful Containerlab recovery procedure remotely."""
+    if not settings.testbed_project_path:
+        raise RuntimeError("TESTBED_PROJECT_PATH must be configured.")
+    topology = f"{settings.testbed_project_path}/osvbng01.clab.yml"
+    command = _ssh_base(settings) + [
+        "sudo containerlab redeploy "
+        f"--topo {shlex.quote(topology)} --keep-mgmt-net --graceful"
+    ]
+    with log_path.open("a", encoding="utf-8") as handle:
+        return subprocess.run(
+            command,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+
+
 def _annotate_fault_labels(artifacts: Path) -> list[str]:
     """Add evidence-backed Blaster anomaly labels without changing Stage 1 data."""
     report_path = artifacts / "blaster-report.json"

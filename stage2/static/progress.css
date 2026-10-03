@@ -1,18 +1,1 @@
-.dataset-nav { margin-top: 24px; }
-.dataset-history { display: grid; gap: 7px; }
-.dataset-item { width: 100%; border: 0; border-radius: 10px; background: transparent; color: #fff; cursor: pointer; padding: 10px; text-align: left; }
-.dataset-item:hover, .dataset-item:focus-visible { background: #2c78b6; outline: none; }
-.dataset-title, .dataset-meta { display: block; }
-.dataset-title { font-weight: 700; }
-.dataset-meta, .history-empty { color: #bdd8f0; font-size: .78rem; line-height: 1.35; }
-.history-empty { padding: 0 10px; }
-.progress { align-items: center; display: flex; gap: 9px; }
-.progress-dot { background: #2d78b5; border-radius: 50%; display: inline-block; flex: 0 0 auto; height: 8px; width: 8px; animation: progress-pulse 1.25s ease-in-out infinite; }
-@keyframes progress-pulse { 0%, 100% { opacity: .45; transform: scale(.82); } 50% { opacity: 1; transform: scale(1.16); } }
-.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 14px; margin: 11px 0 2px; font-size: 13px; font-weight: 500; }
-.metrics span, .metrics strong { display: block; }
-.metrics strong { font-size: 14px; }
-.completion p { margin: 5px 0 0; font-weight: 500; }
-.completion-actions a { display: inline-block; margin: 12px 8px 0 0; background: #fff; color: #175a97; text-decoration: none; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
-@media (prefers-reduced-motion: reduce) { .progress-dot { animation: none; } }
-@media (max-width: 720px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.progress-dot{width:8px;height:8px;flex:0 0 auto;border-radius:50%;background:#f26a3d;animation:progress-pulse 1.35s ease-in-out infinite}@keyframes progress-pulse{0%,100%{opacity:.45;transform:scale(.84)}50%{opacity:1;transform:scale(1.12)}}@media(prefers-reduced-motion:reduce){.progress-dot{animation:none}}

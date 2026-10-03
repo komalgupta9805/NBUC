@@ -1,0 +1,141 @@
+form[hidden] { display: none; }
+
+.sidebar nav { display: grid; gap: 3px; }
+.workspace-nav {
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 10px 12px;
+  text-align: left;
+}
+.workspace-nav:hover,
+.workspace-nav.active { background: rgba(255, 255, 255, .42); }
+.workspace-nav.active { font-weight: 700; }
+.recipe-selector {
+  display: grid;
+  gap: 3px;
+  margin: 3px 0 7px 12px;
+  padding: 6px;
+  border: 1px solid #e2d8ca;
+  border-radius: 10px;
+  background: #fffdf9;
+  box-shadow: 0 5px 14px rgba(40, 32, 24, .07);
+}
+.recipe-selector[hidden] { display: none; }
+.recipe-selector-option {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #49453f;
+  cursor: pointer;
+  font: inherit;
+  font-size: .84rem;
+  padding: 7px 8px;
+  text-align: left;
+}
+.recipe-selector-option:hover,
+.recipe-selector-option:focus-visible { background: #fce9e1; color: #8d3d25; outline: none; }
+.recipe-selector-loading { color: #756d63; font-size: .8rem; padding: 7px 8px; }
+
+.workspace-panel {
+  width: min(100%, 980px);
+  margin: 22px auto 52px;
+  color: var(--ink, #1f1b16);
+}
+.eyebrow {
+  color: #7c746a;
+  font-size: .73rem;
+  font-weight: 800;
+  letter-spacing: .14em;
+  margin: 0 0 7px;
+}
+.workspace-heading { font-size: 1.6rem; margin: 0 0 25px; }
+.workspace-empty,
+.workspace-loading { color: #756d63; margin: 28px 0; }
+
+.status-pill {
+  align-items: center;
+  color: #756d63;
+  display: inline-flex;
+  font-size: .82rem;
+  font-weight: 700;
+  gap: 6px;
+  white-space: nowrap;
+}
+.status-pill::before { background: #a59d92; border-radius: 50%; content: ""; height: 7px; width: 7px; }
+.status-implemented::before,
+.status-completed::before,
+.status-configured::before { background: #26895d; }
+.status-running::before,
+.status-queued::before,
+.status-preparing-testbed::before,
+.status-partial::before { background: #d77643; }
+.status-failed::before,
+.status-rejected::before,
+.status-cancelled::before,
+.status-configuration-incomplete::before { background: #bd6249; }
+
+.experiment-list {
+  background: rgba(255, 255, 255, .55);
+  border: 1px solid #e2d8ca;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.experiment-table-header,
+.experiment-row {
+  align-items: center;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1.1fr 1.25fr;
+  gap: 18px;
+  padding: 15px 18px;
+}
+.experiment-table-header {
+  border-bottom: 1px solid #e2d8ca;
+  color: #7c746a;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.experiment-row {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #ece4d8;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+.experiment-row:last-child { border-bottom: 0; }
+.experiment-row.is-openable { cursor: pointer; }
+.experiment-row.is-openable:hover { background: rgba(244, 199, 180, .2); }
+.experiment-recipe { font-size: .98rem; }
+.experiment-sessions,
+.experiment-time { color: #756d63; font-size: .9rem; }
+
+.testbed-panel {
+  background: rgba(255, 255, 255, .55);
+  border: 1px solid #e2d8ca;
+  border-radius: 14px;
+  box-sizing: border-box;
+  max-width: 670px;
+  padding: 28px 30px 22px;
+}
+.testbed-panel .workspace-heading { margin: 0; }
+.testbed-heading { align-items: center; display: flex; justify-content: space-between; gap: 20px; }
+.testbed-checks { border-bottom: 1px solid #e2d8ca; border-top: 1px solid #e2d8ca; margin-top: 23px; padding: 8px 0; }
+.testbed-check { align-items: center; display: flex; justify-content: space-between; padding: 11px 0; }
+.last-checked { color: #756d63; font-size: .86rem; margin: 18px 0 0; }
+
+@media (max-width: 720px) {
+  .workspace-panel { margin-top: 14px; }
+  .experiment-table-header { display: none; }
+  .experiment-row { grid-template-columns: 1fr auto; gap: 8px 16px; }
+  .experiment-sessions { grid-column: 1; grid-row: 2; }
+  .experiment-time { grid-column: 2; grid-row: 2; text-align: right; }
+  .testbed-panel { padding: 22px 20px 18px; }
+}

@@ -78,12 +78,14 @@ class JobManager:
             execute = getattr(executor_module, "execute", None)
             if not callable(execute):
                 raise RuntimeError(f"Recipe executor {module_name!r} does not expose execute().")
+            timeout_setting = recipe_definition.get("timeout_setting", "default_job_timeout_seconds")
+            timeout_seconds = getattr(settings, timeout_setting)
             job.update(stage="running_experiment", progress_pct=30)
             result = execute(
                 settings,
                 job["directory"],
                 job["intent"]["parameters"],
-                settings.default_job_timeout_seconds,
+                timeout_seconds,
             )
             job.update(stage="packaging_dataset", progress_pct=80)
             self._package(job, result)
@@ -92,7 +94,7 @@ class JobManager:
             self._finish(
                 job,
                 "failed",
-                f"Execution exceeded the {settings.default_job_timeout_seconds // 60}-minute timeout and was terminated; partial logs preserved.",
+                "Execution exceeded its configured timeout and was terminated; partial logs preserved.",
             )
         except Exception as exc:
             self._finish(job, "failed", f"Experiment execution failed: {exc}")
@@ -101,7 +103,8 @@ class JobManager:
         directory: Path = job["directory"]
         artifacts = directory / "artifacts"
         artifacts.mkdir(exist_ok=True)
-        metadata = {"request_id": job["job_id"], "user_request_text": job["user_request"], "normalized_intent": job["intent"], "topology": "osvbng", "recipe": job["intent"]["recipe"], "parameters": job["intent"]["parameters"], "timestamp_start": result.get("timestamp_start"), "timestamp_end": datetime.now(UTC).isoformat(), "testbed_host_env_var": "TESTBED_HOST", "experiment_version": "experiment-a", **result, "artifact_paths": {"dataset": "dataset.tar.gz", "artifacts_dir": "artifacts/"}}
+        result["timestamp_end"] = datetime.now(UTC).isoformat()
+        metadata = {"request_id": job["job_id"], "user_request_text": job["user_request"], "normalized_intent": job["intent"], "topology": "osvbng", "recipe": job["intent"]["recipe"], "parameters": job["intent"]["parameters"], "timestamp_start": result.get("timestamp_start"), "timestamp_end": result["timestamp_end"], "testbed_host_env_var": "TESTBED_HOST", "experiment_version": "experiment-a", **result, "artifact_paths": {"dataset": "dataset.tar.gz", "artifacts_dir": "artifacts/"}}
         (directory / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
         with tarfile.open(directory / "dataset.tar.gz", "w:gz") as archive:
             archive.add(directory / "metadata.json", arcname="metadata.json")
