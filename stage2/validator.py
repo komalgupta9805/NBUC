@@ -24,7 +24,7 @@ def validate(raw: object) -> ValidationResult:
     if isinstance(recipe, str):
         recipe = RECIPE_ALIASES.get(recipe, recipe)
     if raw.get("needs_clarification") or recipe is None:
-        return ValidationResult("needs_clarification", str(raw.get("clarification_question") or "Which experiment do you need: session binding, scaling, disconnect/reconnect, or RADIUS accounting?"), options=["Session binding", "Scaling", "Disconnect/reconnect", "RADIUS accounting"])
+        return ValidationResult("needs_clarification", str(raw.get("clarification_question") or "Which experiment do you need: session binding, scaling, disconnect/reconnect, or RADIUS accounting?"), options=["Session binding", "Scaling", "Disconnect/reconnect",])
     if recipe not in RECIPE_REGISTRY:
         return ValidationResult("not_implemented", "That BNG use case is currently not implemented (future).")
     if RECIPE_REGISTRY[recipe]["status"] != "implemented":

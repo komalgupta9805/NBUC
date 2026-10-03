@@ -127,11 +127,37 @@ def _mentions_recipe(text: str) -> bool:
 def deterministic_intent(message: str) -> dict[str, Any]:
     """Narrow, non-executing parser used only when Groq is not configured."""
     text = message.lower()
-    if not any(token in text for token in ("bng", "ipoe", "dhcp", "subscriber", "radius")):
+    if re.fullmatch(r"\s*\d+\s*", text):
+        return {
+            "topology": "osvbng",
+            "recipe": None,
+            "confidence": "low",
+            "parameters": {},
+            "needs_clarification": True,
+            "clarification_question": "Which experiment do you need: session binding, scaling or disconnect/reconnect?",
+            "out_of_scope": False,
+        }
+    if not any(
+    token in text
+    for token in (
+        "bng",
+        "ipoe",
+        "dhcp",
+        "subscriber",
+        "session",
+        "radius",
+        "flap",
+        "cycle",
+        "reconnect",
+        "disconnect",
+        "scale",
+        "bind",
+    )
+):
         return {"topology": None, "recipe": None, "confidence": "high", "parameters": {}, "needs_clarification": False, "clarification_question": None, "out_of_scope": True}
     if any(token in text for token in ("radius", "accounting", "acct")):
         recipe = "radius-acct"
-    elif any(token in text for token in ("flap", "reconnect", "disconnect")):
+    elif any(token in text for token in ("flap", "cycle", "cycles", "reconnect", "disconnect")):
         recipe = "ipoe-flap"
     elif any(token in text for token in ("scale", "how many", "setup rate", "sweep")):
         recipe = "ipoe-scale"

@@ -155,7 +155,9 @@ def health():
 
 @app.get("/api/capabilities")
 def capabilities():
-    """Read-only frontend capabilities derived from the canonical registry."""
+    """Read-only frontend capabilities for implemented recipes."""
+    supported_recipes = {"ipoe-bind", "ipoe-scale", "ipoe-flap"}
+
     return {
         "recipes": [
             {
@@ -164,6 +166,7 @@ def capabilities():
                 "parameters": RECIPE_PARAMETERS[recipe_id],
             }
             for recipe_id, definition in RECIPE_REGISTRY.items()
+            if recipe_id in supported_recipes
         ]
     }
 
@@ -245,7 +248,6 @@ def is_result_question(message: str) -> bool:
         "success percentage",
         "success %",
         "established",
-        "sessions",
         "setup rate",
         "peak active",
         "cpu",
@@ -259,6 +261,12 @@ def is_result_question(message: str) -> bool:
         "scale progression",
         "scaling",
         "scaled",
+        "as the number of sessions increased",
+"as sessions increased",
+"as session count increased",
+"how many sessions were established",
+"how many sessions established",
+"number of sessions established",
     )
 
     return any(word in text for word in question_words)
