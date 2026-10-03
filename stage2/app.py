@@ -230,7 +230,6 @@ def is_result_question(message: str) -> bool:
 
     question_words = (
         "why",
-        "how",
         "what caused",
         "what is causing",
         "explain",
@@ -267,6 +266,18 @@ def is_result_question(message: str) -> bool:
 "how many sessions were established",
 "how many sessions established",
 "number of sessions established",
+ "did all sessions reconnect",
+"did all requested sessions reconnect",
+"were all sessions reconnected",
+"were all requested sessions reconnected",
+"did all sessions reconnect after each flap",
+"was the reconnect behavior consistent across cycles",
+"what does the reconnect time tell us",
+"were there any signs of session loss after reconnection",
+"what evidence supports the conclusion that the flap test was successful",
+"were there any signs of instability",
+"was there any evidence of performance degradation as the load increased",
+"is there evidence of a bottleneck",
     )
 
     return any(word in text for word in question_words)
