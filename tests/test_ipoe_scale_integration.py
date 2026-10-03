@@ -25,6 +25,12 @@ class IpoeScaleIntegrationTests(unittest.TestCase):
         self.assertEqual(result.kind, "confirm")
         self.assertEqual(result.intent, {"topology": "osvbng", "recipe": "ipoe-scale", "parameters": raw["parameters"]})
 
+    def test_scale_request_recognizes_go_till_maximum(self) -> None:
+        raw = deterministic_intent("generate ipoe scale start from 20 sessions go till 60 sessions")
+        self.assertEqual(raw["recipe"], "ipoe-scale")
+        self.assertEqual(raw["parameters"]["start_sessions"], 20)
+        self.assertEqual(raw["parameters"]["max_sessions"], 60)
+
     def test_registry_driven_dispatch_uses_scale_timeout(self) -> None:
         manager = JobManager.__new__(JobManager)
         manager.jobs = {
