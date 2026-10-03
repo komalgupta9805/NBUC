@@ -140,11 +140,17 @@ def _ensure_point_preflight(
 
 def _recovery_outcome(preflight_events: list[dict[str, Any]]) -> str:
     """Summarize whether any required recovery ultimately restored health."""
-    recoveries = [event for event in preflight_events if event["event"] == "recovery"]
+    recoveries = [
+        event
+        for event in preflight_events
+        if event["event"] in {"recovery", "point_retry_recovery"}
+    ]
     if not recoveries:
         return "not_required"
     last_recovery = recoveries[-1]
     for event in preflight_events:
+        if last_recovery["event"] == "point_retry_recovery" and last_recovery["completed"]:
+            return "recovered"
         if (
             event["event"] == "preflight"
             and event["sessions"] == last_recovery["sessions"]
@@ -153,6 +159,59 @@ def _recovery_outcome(preflight_events: list[dict[str, Any]]) -> str:
         ):
             return "recovered"
     return "unhealthy_after_recovery_attempts"
+
+
+def _recover_incomplete_point(
+    settings: Settings,
+    log_path: Path,
+    sessions: int,
+    attempt: int,
+    deadline: float,
+    preflight_events: list[dict[str, Any]],
+) -> bool:
+    """Gracefully reset a testbed after an incomplete point before retrying it."""
+    timeout = _remaining_timeout(deadline, RECOVERY_TIMEOUT_SECONDS)
+    if timeout <= 0:
+        preflight_events.append({
+            "sessions": sessions,
+            "event": "point_retry_recovery",
+            "attempt": attempt,
+            "completed": False,
+            "reason": "sweep_timeout",
+        })
+        return False
+
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"[scale] Point established incompletely; starting graceful "
+            f"Containerlab redeploy before retry {attempt}\n"
+        )
+    try:
+        recovery = recover_remote_testbed(settings, log_path, timeout)
+        recovered = recovery.returncode == 0
+    except subprocess.TimeoutExpired:
+        recovered = False
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("[scale] Graceful Containerlab redeploy timed out\n")
+
+    event = {
+        "sessions": sessions,
+        "event": "point_retry_recovery",
+        "attempt": attempt,
+        "completed": recovered,
+    }
+    preflight_events.append(event)
+    if not recovered:
+        return False
+
+    wait_seconds = max(0, settings.preflight_recovery_wait_seconds)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[scale] Waiting {wait_seconds} seconds before retrying point\n")
+    if not _wait_for_recovery(wait_seconds, deadline):
+        event["completed"] = False
+        event["reason"] = "sweep_timeout"
+        return False
+    return True
 
 
 def _latest_run_summary(run_directory: Path) -> dict[str, str]:
@@ -180,6 +239,7 @@ def _write_outputs(
     status: str,
     reason: str | None,
     failed_point: int | None,
+    failed_point_established: int | None,
     preflight_events: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Write Phase-4 time-series and report artifacts."""
@@ -229,6 +289,12 @@ def _write_outputs(
         "points_completed": len(timeseries),
         "completed_scale_points": [point["requested_sessions"] for point in timeseries],
         "failed_scale_point": failed_point,
+        "failed_point_established_sessions": failed_point_established,
+        "failed_point_failed_sessions": (
+            failed_point - failed_point_established
+            if failed_point is not None and failed_point_established is not None
+            else None
+        ),
         "peak_bng_cpu": peak_cpu_observed,
         "established_sessions_blaster": final_established,
         "active_sessions_prometheus": final_active,
@@ -239,7 +305,9 @@ def _write_outputs(
             if event["event"] == "preflight" and not event["passed"]
         ),
         "recovery_attempts": sum(
-            1 for event in preflight_events if event["event"] == "recovery"
+            1
+            for event in preflight_events
+            if event["event"] in {"recovery", "point_retry_recovery"}
         ),
         "recovery_outcome": _recovery_outcome(preflight_events),
         "preflight_events": preflight_events,
@@ -300,11 +368,15 @@ def execute(
     reason: str | None = None
     failed_point: int | None = None
     preflight_events: list[dict[str, Any]] = []
+    point_attempts: dict[int, int] = {}
+    failed_point_established: int | None = None
 
     # The configured timeout applies to the COMPLETE scale sweep.
     deadline = time.monotonic() + timeout_seconds
 
-    for sessions in points:
+    for point_index, sessions in enumerate(points):
+        point_attempt = point_attempts.get(sessions, 0) + 1
+        point_attempts[sessions] = point_attempt
         remaining_seconds = int(deadline - time.monotonic())
 
         if remaining_seconds <= 0:
@@ -442,6 +514,7 @@ def execute(
             artifacts
             / "scale-points"
             / str(sessions)
+            / f"attempt-{point_attempt:02d}"
         )
 
         point_directory.mkdir(
@@ -467,7 +540,7 @@ def execute(
 
         copied: subprocess.CompletedProcess[str] | None = None
 
-        for attempt in range(1, ARTIFACT_COPY_ATTEMPTS + 1):
+        for copy_attempt in range(1, ARTIFACT_COPY_ATTEMPTS + 1):
             remaining_seconds = int(deadline - time.monotonic())
 
             if remaining_seconds <= 0:
@@ -481,7 +554,7 @@ def execute(
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(
                     f"Artifact collection attempt "
-                    f"{attempt}/{ARTIFACT_COPY_ATTEMPTS} "
+                    f"{copy_attempt}/{ARTIFACT_COPY_ATTEMPTS} "
                     f"for {sessions} sessions\n"
                 )
 
@@ -503,7 +576,7 @@ def execute(
             if copied is not None and copied.returncode == 0:
                 break
 
-            if attempt < ARTIFACT_COPY_ATTEMPTS:
+            if copy_attempt < ARTIFACT_COPY_ATTEMPTS:
                 remaining_seconds = deadline - time.monotonic()
 
                 if remaining_seconds <= 0:
@@ -557,6 +630,34 @@ def execute(
         )
         active_sessions = summary.get("peak_active_sessions")
 
+        if established < sessions:
+            failed_point_established = established
+            retry_limit = max(0, settings.max_preflight_recovery_attempts)
+            if point_attempt <= retry_limit and _recover_incomplete_point(
+                settings,
+                log_path,
+                sessions,
+                point_attempt,
+                deadline,
+                preflight_events,
+            ):
+                with log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        f"[scale] Retrying {sessions}-session point after "
+                        f"incomplete attempt {point_attempt}: {established}/{sessions} established\n"
+                    )
+                points.insert(point_index + 1, sessions)
+                continue
+
+            final_status = "partial"
+            failed_point = sessions
+            reason = (
+                f"Scale sweep stopped at {sessions} sessions because only "
+                f"{established} sessions were established after {point_attempt} attempt(s); "
+                "completed points were preserved."
+            )
+            break
+
         timeseries.append(
             {
                 "timestamp": datetime.now(UTC).isoformat(),
@@ -567,16 +668,7 @@ def execute(
                 "setup_rate": setup_rate,
             }
         )
-
-        if established < sessions:
-            final_status = "partial"
-            failed_point = sessions
-            reason = (
-                f"Scale sweep stopped at {sessions} sessions because only "
-                f"{established} sessions were established; completed points "
-                "were preserved."
-            )
-            break
+        failed_point_established = None
 
         # CPU safety gate:
         # preserve this point, then stop before increasing load.
@@ -599,19 +691,25 @@ def execute(
         status=final_status,
         reason=reason,
         failed_point=failed_point,
+        failed_point_established=failed_point_established,
         preflight_events=preflight_events,
+    )
+
+    result_requested_sessions = failed_point or max_sessions
+    result_established_sessions = (
+        failed_point_established
+        if failed_point_established is not None
+        else output["established_sessions"]
     )
 
     return {
         "status": final_status,
         "reason": reason,
         "timestamp_start": started.isoformat(),
-        "requested_sessions": max_sessions,
-        "established_sessions": output["established_sessions"],
-        "established_sessions_blaster": output[
-            "established_sessions"
-        ],
-        "failed_sessions": max_sessions - output["established_sessions"],
+        "requested_sessions": result_requested_sessions,
+        "established_sessions": result_established_sessions,
+        "established_sessions_blaster": result_established_sessions,
+        "failed_sessions": result_requested_sessions - result_established_sessions,
         "active_sessions_prometheus": output[
             "active_sessions_prometheus"
         ],
@@ -627,7 +725,9 @@ def execute(
             if event["event"] == "preflight" and not event["passed"]
         ),
         "recovery_attempts": sum(
-            1 for event in preflight_events if event["event"] == "recovery"
+            1
+            for event in preflight_events
+            if event["event"] in {"recovery", "point_retry_recovery"}
         ),
         "preflight_events": preflight_events,
         "scale_timeseries": "artifacts/scale_timeseries.csv",

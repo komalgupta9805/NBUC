@@ -34,7 +34,9 @@ def _scale_parameters(text: str) -> dict[str, int]:
     """Extract the bounded scale-specific fields from common natural phrasing."""
     parameters: dict[str, int] = {}
     start = re.search(r"\b(?:from|start(?:ing)?(?:\s+at)?)\s*(\d+)\s*(?:sessions?|subscribers?)?", text, re.I)
-    target = re.search(r"\b(?:to|up\s+(?:to|till|until)|target|maximum|max)\s*(\d+)\s*(?:sessions?|subscribers?)?", text, re.I)
+    if not start:
+        start = re.search(r"\b(\d+)\s*(?:sessions?|subscribers?)?\s+to\s+\d+\s*(?:sessions?|subscribers?)?", text, re.I)
+    target = re.search(r"\b(?:to|till|until|up\s+(?:to|till|until)|go\s+(?:up\s+)?(?:to|till|until)|target|maximum|max)\s*(\d+)\s*(?:sessions?|subscribers?)?", text, re.I)
     cpu = re.search(r"\bcpu(?:\s+safety)?(?:\s+(?:limit|threshold))?\s*(?:of|to|=)?\s*(\d+)\s*(?:%|percent)?", text, re.I)
     cpu_suffix = re.search(r"\b(\d+)\s*(?:%|percent)\s+cpu(?:\s+(?:limit|threshold))?", text, re.I)
     if start:
