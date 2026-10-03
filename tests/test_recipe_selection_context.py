@@ -11,11 +11,84 @@ from stage2.app import (
     chat,
     recipe_selection,
 )
+from stage2.conversation import conversations
 from stage2.intent_parser import parse_intent
 from stage2.validator import validate
 
 
 class RecipeSelectionContextTests(unittest.TestCase):
+    def test_scale_slots_are_collected_across_multiple_turns(self) -> None:
+        conversation_id = f"test-scale-slots-{uuid.uuid4()}"
+        with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
+            first = chat(ChatRequest(conversation_id=conversation_id, message="IPoE Scale"))
+            second = chat(ChatRequest(conversation_id=conversation_id, message="20"))
+            third = chat(ChatRequest(conversation_id=conversation_id, message="go till 60"))
+            final = chat(ChatRequest(conversation_id=conversation_id, message="80%"))
+        self.assertEqual(first["type"], "needs_clarification")
+        self.assertIn("starting", first["assistant_message"].lower())
+        self.assertIn("maximum", second["assistant_message"].lower())
+        self.assertIn("cpu", third["assistant_message"].lower())
+        self.assertEqual(final["type"], "confirm")
+        self.assertEqual(final["intent"]["parameters"], {
+            "start_sessions": 20,
+            "max_sessions": 60,
+            "cpu_limit": 80,
+        })
+
+    def test_scale_asks_only_for_unresolved_slots(self) -> None:
+        conversation_id = f"test-scale-partial-{uuid.uuid4()}"
+        with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
+            response = chat(ChatRequest(
+                conversation_id=conversation_id,
+                message="Generate IPoE Scale starting from 10 sessions and go till 60 sessions.",
+            ))
+        self.assertEqual(response["type"], "needs_clarification")
+        self.assertIn("cpu", response["assistant_message"].lower())
+        self.assertNotIn("maximum number", response["assistant_message"].lower())
+        self.assertIsNone(conversations.get(conversation_id).pending_intent)
+
+    def test_scale_with_all_slots_proceeds_to_confirmation(self) -> None:
+        conversation_id = f"test-scale-complete-{uuid.uuid4()}"
+        with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
+            response = chat(ChatRequest(
+                conversation_id=conversation_id,
+                message="Generate IPoE Scale starting from 10 sessions, go till 60 sessions, CPU limit 80%.",
+            ))
+        self.assertEqual(response["type"], "confirm")
+        self.assertEqual(response["intent"]["parameters"], {
+            "start_sessions": 10,
+            "max_sessions": 60,
+            "cpu_limit": 80,
+        })
+
+    def test_menu_selected_scale_accepts_a_bare_start_count(self) -> None:
+        conversation_id = f"test-menu-scale-{uuid.uuid4()}"
+        recipe_selection(RecipeSelectionRequest(conversation_id=conversation_id, recipe="ipoe-scale"))
+        with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
+            response = chat(ChatRequest(conversation_id=conversation_id, message="20"))
+        self.assertEqual(response["type"], "needs_clarification")
+        self.assertEqual(conversations.get(conversation_id).collected_parameters, {"start_sessions": 20})
+
+    def test_bind_requires_sessions_before_confirmation(self) -> None:
+        conversation_id = f"test-bind-slots-{uuid.uuid4()}"
+        with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
+            first = chat(ChatRequest(conversation_id=conversation_id, message="Generate an IPoE Bind dataset."))
+            final = chat(ChatRequest(conversation_id=conversation_id, message="50 sessions"))
+        self.assertEqual(first["type"], "needs_clarification")
+        self.assertIn("how many sessions", first["assistant_message"].lower())
+        self.assertEqual(final["type"], "confirm")
+        self.assertEqual(final["intent"]["parameters"]["sessions"], 50)
+
+    def test_flap_preserves_sessions_while_collecting_cycles(self) -> None:
+        conversation_id = f"test-flap-slots-{uuid.uuid4()}"
+        with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
+            first = chat(ChatRequest(conversation_id=conversation_id, message="Generate IPoE Flap with 40 sessions."))
+            final = chat(ChatRequest(conversation_id=conversation_id, message="Run 2 cycles."))
+        self.assertEqual(first["type"], "needs_clarification")
+        self.assertIn("cycles", first["assistant_message"].lower())
+        self.assertEqual(final["type"], "confirm")
+        self.assertEqual(final["intent"]["parameters"], {"sessions": 40, "cycles": 2})
+
     def test_scale_parameter_follow_up_uses_selected_context(self) -> None:
         with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
             parsed = parse_intent(

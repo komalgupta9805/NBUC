@@ -29,6 +29,43 @@ class RecipeSelectionRequest(BaseModel):
     recipe: str | None = None
 
 
+def _missing_required_parameters(recipe: str, parameters: dict[str, object]) -> list[str]:
+    """Return required conversational slots that have not been supplied."""
+    return [
+        name
+        for name, rule in RECIPE_PARAMETERS[recipe].items()
+        if rule.get("required") and name not in parameters
+    ]
+
+
+def _missing_parameter_question(recipe: str, missing: list[str]) -> str:
+    """Ask only for the unresolved slots in natural recipe-specific language."""
+    missing_set = set(missing)
+    if recipe == "ipoe-bind":
+        return "How many sessions should I generate?"
+    if recipe == "ipoe-scale":
+        if missing_set == {"start_sessions", "max_sessions", "cpu_limit"}:
+            return "What starting number of sessions, maximum number of sessions, and CPU safety limit (%) should I use?"
+        if missing_set == {"max_sessions", "cpu_limit"}:
+            return "What maximum number of sessions should I scale up to, and what CPU safety limit (%) should I use?"
+        if missing_set == {"start_sessions", "max_sessions"}:
+            return "What starting number of sessions and maximum number of sessions should I use?"
+        if missing_set == {"start_sessions", "cpu_limit"}:
+            return "What starting number of sessions and CPU safety limit (%) should I use?"
+        if missing_set == {"start_sessions"}:
+            return "What starting number of sessions should I use?"
+        if missing_set == {"max_sessions"}:
+            return "What maximum number of sessions should I scale to?"
+        return "What CPU safety limit (%) should I use?"
+    if recipe == "ipoe-flap":
+        if missing_set == {"sessions", "cycles"}:
+            return "How many sessions should I use, and how many disconnect/reconnect cycles should I run?"
+        if missing_set == {"sessions"}:
+            return "How many sessions should I use?"
+        return "How many disconnect/reconnect cycles should I run?"
+    return "Please provide the remaining required parameters."
+
+
 @app.get("/")
 def index():
     return FileResponse(ROOT / "templates" / "index.html")
@@ -167,6 +204,7 @@ def recipe_selection(payload: RecipeSelectionRequest):
         conversation.selected_recipe = None
         conversation.selected_topology = None
         conversation.pending_intent = None
+        conversation.collected_parameters.clear()
         return {"selected_recipe": None, "selected_topology": None}
 
     recipe = RECIPE_ALIASES.get(payload.recipe, payload.recipe)
@@ -175,6 +213,7 @@ def recipe_selection(payload: RecipeSelectionRequest):
     conversation.selected_recipe = recipe
     conversation.selected_topology = "osvbng"
     conversation.pending_intent = None
+    conversation.collected_parameters.clear()
     return {"selected_recipe": recipe, "selected_topology": "osvbng"}
 
 
@@ -187,6 +226,7 @@ def chat(payload: ChatRequest):
         conversation.pending_intent = None
         conversation.selected_recipe = None
         conversation.selected_topology = None
+        conversation.collected_parameters.clear()
         if "error" in job:
             return {"type": "rejected", "assistant_message": job["error"], "reason": job["error"]}
         return {"type": "accepted", "assistant_message": "Preparing testbed…", "job_id": job["job_id"]}
@@ -194,15 +234,46 @@ def chat(payload: ChatRequest):
         conversation.pending_intent = None
         conversation.selected_recipe = None
         conversation.selected_topology = None
+        conversation.collected_parameters.clear()
         return {"type": "rejected", "assistant_message": "Okay — I did not start an experiment.", "reason": "Cancelled before execution."}
     conversation.history.append({"message": message})
-    result = validate(
-        parse_intent(
-            message,
-            selected_recipe=conversation.selected_recipe,
-            selected_topology=conversation.selected_topology,
-        )
+    raw = parse_intent(
+        message,
+        selected_recipe=conversation.selected_recipe,
+        selected_topology=conversation.selected_topology,
     )
+    recipe = raw.get("recipe")
+    if isinstance(recipe, str):
+        recipe = RECIPE_ALIASES.get(recipe, recipe)
+
+    if recipe in RECIPE_REGISTRY:
+        parsed_parameters = raw.get("parameters")
+        if not isinstance(parsed_parameters, dict):
+            parsed_parameters = {}
+        if recipe != conversation.selected_recipe:
+            conversation.collected_parameters.clear()
+        parameters = {**conversation.collected_parameters, **parsed_parameters}
+        raw = {
+            **raw,
+            "recipe": recipe,
+            "topology": raw.get("topology") or conversation.selected_topology or "osvbng",
+            "parameters": parameters,
+        }
+
+    result = validate(raw)
+    if result.kind == "confirm" and recipe in RECIPE_REGISTRY:
+        parameters = raw["parameters"]
+        conversation.selected_recipe = recipe
+        conversation.selected_topology = raw["topology"]
+        conversation.collected_parameters = parameters
+        missing = _missing_required_parameters(recipe, parameters)
+        if missing:
+            conversation.pending_intent = None
+            return {
+                "type": "needs_clarification",
+                "assistant_message": _missing_parameter_question(recipe, missing),
+            }
+
     response = {"type": result.kind, "assistant_message": result.message}
     if result.options:
         response["options"] = result.options

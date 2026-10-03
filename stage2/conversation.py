@@ -8,6 +8,7 @@ class Conversation:
     pending_intent: dict | None = None
     selected_recipe: str | None = None
     selected_topology: str | None = None
+    collected_parameters: dict[str, int] = field(default_factory=dict)
     history: list[dict] = field(default_factory=list)
 
 

@@ -59,13 +59,13 @@ RECIPE_PARAMETERS = {
         "duration": {"default": 60, "minimum": 30, "maximum": 600, "required": False},
     },
     "ipoe-scale": {
-        "start_sessions": {"default": 50, "minimum": 10, "maximum": 700, "required": False},
-        "max_sessions": {"default": 200, "minimum": 10, "maximum": 700, "required": False},
-        "cpu_limit": {"default": 80, "minimum": 50, "maximum": 95, "required": False},
+        "start_sessions": {"default": 50, "minimum": 10, "maximum": 700, "required": True},
+        "max_sessions": {"default": 200, "minimum": 10, "maximum": 700, "required": True},
+        "cpu_limit": {"default": 80, "minimum": 50, "maximum": 95, "required": True},
     },
     "ipoe-flap": {
-        "sessions": {"default": 20, "minimum": 10, "maximum": 700, "required": False},
-        "cycles": {"default": 1, "minimum": 1, "maximum": 5, "required": False},
+        "sessions": {"default": 20, "minimum": 10, "maximum": 700, "required": True},
+        "cycles": {"default": 1, "minimum": 1, "maximum": 5, "required": True},
     },
     "radius-acct": {
         "sessions": {"default": 20, "minimum": 10, "maximum": 700, "required": False},
