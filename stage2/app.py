@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-
+import subprocess
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,15 +36,77 @@ def index():
 
 @app.get("/api/health")
 def health():
+    testbed_configured = bool(
+        settings.testbed_host
+        and settings.testbed_user
+        and settings.testbed_project_path
+        and settings.testbed_ssh_key_path
+    )
+
+    components = {
+        "bng": "not_available",
+        "bng_blaster": "not_available",
+        "prometheus": "not_available",
+        "grafana": "not_available",
+        "frr": "not_available",
+    }
+
+    if testbed_configured:
+        key = Path(settings.testbed_ssh_key_path)
+
+        ssh_base = [
+            "ssh",
+            "-i",
+            str(key),
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "BatchMode=yes",
+            f"{settings.testbed_user}@{settings.testbed_host}",
+        ]
+
+        remote_command = (
+            "printf 'bng='; "
+            "sudo -n docker inspect -f '{{.State.Status}}' clab-osvbng01-bng1; "
+            "printf 'bng_blaster='; "
+            "sudo -n docker exec clab-osvbng01-subscribers sh -c 'command -v bngblaster'; "
+            "printf 'prometheus='; "
+            "sudo -n docker inspect -f '{{.State.Status}}' mon-prometheus; "
+            "printf 'grafana='; "
+            "sudo -n docker inspect -f '{{.State.Status}}' mon-grafana; "
+            "printf 'frr='; "
+            "sudo -n docker inspect -f '{{.State.Status}}' clab-osvbng01-corerouter1"
+        )
+
+        try:
+            result = subprocess.run(
+                ssh_base + [remote_command],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+
+            for line in result.stdout.splitlines():
+                if "=" not in line:
+                    continue
+
+                name, value = line.split("=", 1)
+                value = value.strip()
+
+                if name == "bng_blaster":
+                    components[name] = "available" if value else "not_available"
+                elif name in components:
+                    components[name] = value or "not_available"
+
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
     return {
         "status": "ok",
         "llm_configured": bool(settings.groq_api_key),
-        "testbed_configured": bool(
-            settings.testbed_host
-            and settings.testbed_user
-            and settings.testbed_project_path
-            and settings.testbed_ssh_key_path
-        ),
+        "testbed_configured": testbed_configured,
+        "components": components,
     }
 
 

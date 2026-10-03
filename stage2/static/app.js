@@ -262,39 +262,53 @@ function workspaceElement(tag, className, text) {
   return element;
 }
 
-async function getWorkspaceData() {
-  const [healthResponse, capabilitiesResponse, experimentsResponse] = await Promise.all([
-    fetch("/api/health", { cache: "no-store" }),
-    fetch("/api/capabilities", { cache: "no-store" }),
-    fetch("/api/experiments", { cache: "no-store" })
+async function getWorkspaceData(view) {
+  async function getJson(url) {
+    const response = await fetch(url, { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status}).`);
+    }
+
+    return response.json();
+  }
+
+  if (view === "testbed") {
+    const health = await getJson("/api/health");
+    return { health };
+  }
+
+  if (view === "experiments") {
+    const experiments = await getJson("/api/experiments");
+    return { experiments };
+  }
+
+  if (view === "dashboard") {
+  const experiments = await getJson("/api/experiments");
+  return {
+    experiments,
+    health: { testbed_configured: true },
+  };
+}
+
+  const [health, recipes, experiments] = await Promise.all([
+    getJson("/api/health"),
+    getJson("/api/capabilities"),
+    getJson("/api/experiments"),
   ]);
-  if (!healthResponse.ok || !capabilitiesResponse.ok || !experimentsResponse.ok) throw new Error("Workspace data is temporarily unavailable.");
-  const [health, capabilities, experimentHistory] = await Promise.all([
-    healthResponse.json(), capabilitiesResponse.json(), experimentsResponse.json()
-  ]);
-  capabilityMap = new Map((capabilities.recipes || []).map((recipe) => [recipe.id, recipe]));
-  renderRecipeSelector(capabilities.recipes || []);
-  const generated = (experimentHistory.experiments || [])
-    .filter((experiment) => ["completed", "partial"].includes(experiment.status))
-    .map((experiment) => ({
-      job_id: experiment.job_id,
-      recipe: experiment.recipe,
-      sessions: experiment.requested_sessions ?? experiment.parameters?.sessions ?? experiment.parameters?.max_sessions,
-      timestamp: experiment.timestamp_end || experiment.timestamp_start
-    }));
-  datasetHistory = mergeHistory(datasetHistory, generated);
-  saveHistory();
-  renderHistory();
-  const connection = document.querySelector("#connection-status");
-  if (connection) connection.textContent = health.testbed_configured ? "Configured workspace" : "Configuration incomplete";
-  return { health, recipes: capabilities.recipes || [], experiments: experimentHistory.experiments || [] };
+
+  return { health, recipes, experiments };
 }
 
 function statusPill(status) {
   const normalized = status || "unknown";
   const labels = { implemented: "Ready", implementation_required: "In development", not_available: "Not available", configuration_incomplete: "Configuration incomplete" };
   const label = labels[normalized] || normalized[0].toUpperCase() + normalized.slice(1);
-  return workspaceElement("span", `status-pill status-${normalized.replaceAll("_", "-")}`, label);
+  return workspaceElement(
+  "span",
+  `status-pill status-${normalized.replaceAll("_", "-")}${normalized === "available" ? " status-configured" : ""}`,
+  label
+);
 }
 
 function sessionSummary(experiment) {
@@ -303,45 +317,267 @@ function sessionSummary(experiment) {
   const sessions = experiment.requested_sessions ?? parameters.sessions ?? parameters.session_count ?? parameters.max_sessions;
   return sessions == null ? "—" : `${sessions} sessions`;
 }
+function renderDashboard(data) {
+  const shell = workspaceElement("section", "workspace-panel");
+
+  const experiments = Array.isArray(data.experiments)
+  ? data.experiments
+  : (data.experiments?.experiments || []);
+
+  const total = experiments.length;
+  const completed = experiments.filter((experiment) => experiment.status === "completed").length;
+  const partial = experiments.filter((experiment) => experiment.status === "partial").length;
+  const failed = experiments.filter((experiment) => experiment.status === "failed").length;
+  const running = experiments.filter((experiment) =>
+    ["queued", "preparing_testbed", "running_experiment", "packaging_dataset", "finalizing_dataset", "running"].includes(experiment.status)
+  ).length;
+
+  const testbedConfigured = data.health?.testbed_configured;
+
+  shell.append(
+    workspaceElement("p", "eyebrow", "WORKSPACE"),
+    workspaceElement("h1", "workspace-heading", "Dashboard"),
+    workspaceElement("p", "workspace-empty", "Overview of your BNG dataset generation workspace.")
+  );
+
+  const cards = workspaceElement("div", "metrics");
+
+  cards.append(
+  metric("Total experiments", total),
+  metric("Completed", completed),
+  metric("Partial", partial),
+  metric("Failed", failed),
+  metric("Running", running),
+  metric("Testbed", testbedConfigured ? "Configured" : "Not configured")
+);
+shell.append(cards);
+shell.append(
+  workspaceElement(
+    "p",
+    "workspace-empty",
+    "Completed and partial experiments can be opened to view their generated dataset details."
+  )
+);
+
+  const recentTitle = workspaceElement("h2", "workspace-heading", "Recent experiments");
+  recentTitle.style.marginTop = "32px";
+  shell.append(recentTitle);
+
+  if (!experiments.length) {
+    shell.append(
+      workspaceElement(
+        "p",
+        "workspace-empty",
+        "No experiments have been recorded yet."
+      )
+    );
+    return shell;
+  }
+
+  const recent = workspaceElement("div", "experiment-list");
+  const recentExperiments = [...experiments]
+    .sort(
+      (a, b) =>
+        new Date(b.timestamp_end || b.timestamp_start || 0) -
+        new Date(a.timestamp_end || a.timestamp_start || 0)
+    )
+    .slice(0, 5);
+
+  const header = workspaceElement("div", "experiment-table-header");
+
+  ["Recipe", "Status", "Sessions", "Date / time"].forEach((label) => {
+    header.append(workspaceElement("span", "", label));
+  });
+
+  recent.append(header);
+
+  recentExperiments.forEach((experiment) => {
+    const terminal = ["completed", "partial"].includes(experiment.status);
+
+    const row = document.createElement(terminal ? "button" : "div");
+
+    if (terminal) {
+      row.type = "button";
+      row.addEventListener(
+        "click",
+        () => void showDataset(experiment.job_id)
+      );
+    }
+
+    row.className = `experiment-row${terminal ? " is-openable" : ""}`;
+
+    row.append(
+      workspaceElement(
+        "strong",
+        "experiment-recipe",
+        recipeLabel(experiment.recipe)
+      ),
+      statusPill(experiment.status),
+      workspaceElement(
+        "span",
+        "experiment-sessions",
+        sessionSummary(experiment)
+      ),
+      workspaceElement(
+        "time",
+        "experiment-time",
+        formatTimestamp(
+          experiment.timestamp_end || experiment.timestamp_start
+        ) || "—"
+      )
+    );
+
+    recent.append(row);
+  });
+
+  shell.append(recent);
+
+  return shell;
+}
+
 
 function renderExperiments(data) {
   const shell = workspaceElement("section", "workspace-panel");
-  shell.append(workspaceElement("p", "eyebrow", "EXPERIMENT HISTORY"), workspaceElement("h1", "workspace-heading", "Experiments"));
-  if (!data.experiments.length) { shell.append(workspaceElement("p", "workspace-empty", "No experiments have been recorded yet.")); return shell; }
+
+  const experiments = Array.isArray(data.experiments)
+    ? data.experiments
+    : (data.experiments?.experiments || []);
+
+  shell.append(
+    workspaceElement("p", "eyebrow", "EXPERIMENT HISTORY"),
+    workspaceElement("h1", "workspace-heading", "Experiments")
+  );
+
+  if (!experiments.length) {
+    shell.append(
+      workspaceElement(
+        "p",
+        "workspace-empty",
+        "No experiments have been recorded yet."
+      )
+    );
+    return shell;
+  }
+
   const list = workspaceElement("div", "experiment-list");
   const header = workspaceElement("div", "experiment-table-header");
-  ["Recipe", "Status", "Sessions", "Date / time"].forEach((label) => header.append(workspaceElement("span", "", label)));
+
+  ["Recipe", "Status", "Sessions", "Date / time"].forEach((label) =>
+    header.append(workspaceElement("span", "", label))
+  );
+
   list.append(header);
-  data.experiments.forEach((experiment) => {
+
+  experiments.forEach((experiment) => {
     const terminal = ["completed", "partial"].includes(experiment.status);
+
     const row = document.createElement(terminal ? "button" : "div");
-    if (terminal) { row.type = "button"; row.addEventListener("click", () => void showDataset(experiment.job_id)); }
+
+    if (terminal) {
+      row.type = "button";
+      row.addEventListener(
+        "click",
+        () => void showDataset(experiment.job_id)
+      );
+    }
+
     row.className = `experiment-row${terminal ? " is-openable" : ""}`;
+
     row.append(
-      workspaceElement("strong", "experiment-recipe", recipeLabel(experiment.recipe)),
+      workspaceElement(
+        "strong",
+        "experiment-recipe",
+        recipeLabel(experiment.recipe)
+      ),
       statusPill(experiment.status),
-      workspaceElement("span", "experiment-sessions", sessionSummary(experiment)),
-      workspaceElement("time", "experiment-time", formatTimestamp(experiment.timestamp_end || experiment.timestamp_start) || "—")
+      workspaceElement(
+        "span",
+        "experiment-sessions",
+        sessionSummary(experiment)
+      ),
+      workspaceElement(
+        "time",
+        "experiment-time",
+        formatTimestamp(
+          experiment.timestamp_end || experiment.timestamp_start
+        ) || "—"
+      )
     );
+
     list.append(row);
   });
-  shell.append(list); return shell;
+
+  shell.append(list);
+  return shell;
 }
 
 function renderTestbed(data) {
   const shell = workspaceElement("section", "workspace-panel testbed-panel");
-  const connectionStatus = data.health.testbed_configured ? "configured" : "configuration_incomplete";
-  const connectionLabel = data.health.testbed_configured ? "Configured" : "Configuration incomplete";
-  shell.append(workspaceElement("p", "eyebrow", "TESTBED"));
+
+  const connectionStatus = data.health.testbed_configured
+    ? "configured"
+    : "configuration_incomplete";
+
+  const connectionLabel = data.health.testbed_configured
+    ? "Configured"
+    : "Configuration incomplete";
+
+  shell.append(
+    workspaceElement("p", "eyebrow", "TESTBED")
+  );
+
   const heading = workspaceElement("div", "testbed-heading");
-  heading.append(workspaceElement("h1", "workspace-heading", "osVBNG testbed"), workspaceElement("span", `status-pill status-${connectionStatus.replaceAll("_", "-")}`, connectionLabel));
+
+  heading.append(
+    workspaceElement("h1", "workspace-heading", "osVBNG testbed"),
+    workspaceElement(
+      "span",
+      `status-pill status-${connectionStatus.replaceAll("_", "-")}`,
+      connectionLabel
+    )
+  );
+
   const checks = workspaceElement("div", "testbed-checks");
-  ["BNG", "BNG Blaster", "Prometheus", "Grafana", "FRR / Core Router"].forEach((name) => {
+
+  const components = data.health.components || {};
+
+  const componentList = [
+    ["BNG", "bng"],
+    ["BNG Blaster", "bng_blaster"],
+    ["Prometheus", "prometheus"],
+    ["Grafana", "grafana"],
+    ["FRR / Core Router", "frr"],
+  ];
+
+  componentList.forEach(([name, key]) => {
     const row = workspaceElement("div", "testbed-check");
-    row.append(workspaceElement("span", "", name), statusPill("not_available"));
+
+    let status = components[key] || "not_available";
+
+    if (status === "running" || status === "available") {
+      status = "available";
+    } else {
+      status = "not_available";
+    }
+
+    row.append(
+      workspaceElement("span", "", name),
+      statusPill(status)
+    );
+
     checks.append(row);
   });
-  shell.append(heading, checks, workspaceElement("p", "last-checked", `Last checked: ${formatTimestamp(new Date().toISOString())}`));
+
+  shell.append(
+    heading,
+    checks,
+    workspaceElement(
+      "p",
+      "last-checked",
+      `Last checked: ${formatTimestamp(new Date().toISOString())}`
+    )
+  );
+
   return shell;
 }
 
@@ -417,12 +653,47 @@ function renderRecipeSelector(recipes) {
   if (!recipes.length) selector.append(workspaceElement("span", "recipe-selector-loading", "Recipes unavailable"));
 }
 
-function toggleRecipeSelector() {
+async function toggleRecipeSelector() {
   const selector = document.querySelector("#recipe-selector");
   const toggle = document.querySelector("#recipes-toggle");
   const willOpen = selector.hidden;
-  selector.hidden = !willOpen;
-  toggle.setAttribute("aria-expanded", String(willOpen));
+
+  if (!willOpen) {
+    selector.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  selector.replaceChildren(
+    workspaceElement("span", "recipe-selector-loading", "Loading recipes…")
+  );
+  selector.hidden = false;
+  toggle.setAttribute("aria-expanded", "true");
+
+  try {
+    const response = await fetch("/api/capabilities", { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status}).`);
+    }
+
+    const data = await response.json();
+    const recipes = Array.isArray(data) ? data : (data.recipes || []);
+
+    capabilityMap = new Map(
+      recipes.map((recipe) => [recipe.id, recipe])
+    );
+
+    renderRecipeSelector(recipes);
+  } catch (error) {
+    selector.replaceChildren(
+      workspaceElement(
+        "span",
+        "recipe-selector-loading",
+        "Recipes unavailable"
+      )
+    );
+  }
 }
 
 function activateConversation(reset = false, includeIntro = true, clearRecipeContext = true) {
@@ -438,8 +709,9 @@ function activateConversation(reset = false, includeIntro = true, clearRecipeCon
   setBadge("Ready");
   input.focus();
 }
-
+let workspaceRequestId = 0;
 async function showWorkspace(view) {
+  const requestId = ++workspaceRequestId;
   if (view === "generation") { activateConversation(true); return; }
   showingWorkspace = true;
   hideRecipeSelector();
@@ -450,8 +722,15 @@ async function showWorkspace(view) {
   const loading = workspaceElement("p", "workspace-loading", "Loading workspace…");
   messages.append(loading);
   try {
-    const data = await getWorkspaceData();
-    const renderer = { experiments: renderExperiments, testbed: renderTestbed }[view];
+    const data = await getWorkspaceData(view);
+    if (requestId !== workspaceRequestId) {
+  return;
+}
+    const renderer = {
+  dashboard: renderDashboard,
+  experiments: renderExperiments,
+  testbed: renderTestbed
+}[view];
     messages.replaceChildren(renderer(data));
   } catch (error) {
     messages.replaceChildren(workspaceElement("p", "workspace-empty", error.message || "Workspace data is unavailable."));
@@ -462,4 +741,4 @@ document.querySelector("#new-request").addEventListener("click", () => activateC
 document.querySelector("#recipes-toggle").addEventListener("click", toggleRecipeSelector);
 document.querySelectorAll(".workspace-nav:not(#recipes-toggle)").forEach((button) => button.addEventListener("click", () => void showWorkspace(button.dataset.view)));
 void initialiseHistory();
-void getWorkspaceData().catch(() => { /* initial chat remains available offline */ });
+

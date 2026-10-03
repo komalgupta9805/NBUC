@@ -70,6 +70,14 @@ form[hidden] { display: none; }
 .status-implemented::before,
 .status-completed::before,
 .status-configured::before { background: #26895d; }
+
+.status-available {
+  color: #26895d;
+}
+
+.status-available::before {
+  background: #26895d;
+}
 .status-running::before,
 .status-queued::before,
 .status-preparing-testbed::before,
