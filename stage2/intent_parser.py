@@ -90,7 +90,16 @@ def _context_parameters(
     cycles = _integer(text, ("cycles?", "flaps?", "reconnects?")) if recipe == "ipoe-flap" else None
     if sessions is None and cycles is None:
         number = re.search(r"\b(\d+)\b", text)
-        sessions = int(number.group(1)) if number else None
+        if number:
+            value = int(number.group(1))
+
+            if recipe == "ipoe-flap":
+                if "sessions" not in existing_parameters:
+                    sessions = value
+                elif "cycles" not in existing_parameters:
+                    cycles = value
+            else:
+                sessions = value
     if sessions is not None:
         parameters["sessions"] = sessions
 
