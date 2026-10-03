@@ -31,6 +31,14 @@ class IpoeScaleIntegrationTests(unittest.TestCase):
         self.assertEqual(raw["parameters"]["start_sessions"], 20)
         self.assertEqual(raw["parameters"]["max_sessions"], 60)
 
+    def test_scale_request_recognizes_session_words_between_keywords_and_values(self) -> None:
+        raw = deterministic_intent("generate ipoe scale starting sessions 20 max session 40 and cpu safety limit 80%")
+        self.assertEqual(raw["parameters"], {
+            "start_sessions": 20,
+            "max_sessions": 40,
+            "cpu_limit": 80,
+        })
+
     def test_registry_driven_dispatch_uses_scale_timeout(self) -> None:
         manager = JobManager.__new__(JobManager)
         manager.jobs = {

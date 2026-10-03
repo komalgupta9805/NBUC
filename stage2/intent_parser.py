@@ -26,43 +26,59 @@ def _integer(text: str, names: tuple[str, ...]) -> int | None:
     match = re.search(pattern, text, re.I)
     if match:
         return int(match.group(1))
-    match = re.search(r"\b(\d+)\s+(?:ipoe|subscribers?|sessions?)\b", text, re.I)
-    return int(match.group(1)) if match else None
+    if any(name.startswith(("sessions", "subscribers")) for name in names):
+        match = re.search(r"\b(\d+)\s+(?:ipoe|subscribers?|sessions?)\b", text, re.I)
+        return int(match.group(1)) if match else None
+    return None
 
 
 def _scale_parameters(text: str) -> dict[str, int]:
     """Extract the bounded scale-specific fields from common natural phrasing."""
     parameters: dict[str, int] = {}
-    start = re.search(r"\b(?:from|start(?:ing)?(?:\s+at)?)\s*(\d+)\s*(?:sessions?|subscribers?)?", text, re.I)
+    start = re.search(
+        r"\b(?:from|start(?:ing)?(?:\s+at)?)\s*(?:sessions?|subscribers?)(?:\s+count)?\s*(?:of|=)?\s*(\d+)\b|\b(?:from|start(?:ing)?(?:\s+at)?)\s*(\d+)\s*(?:sessions?|subscribers?)?",
+        text,
+        re.I,
+    )
     if not start:
         start = re.search(r"\b(\d+)\s*(?:sessions?|subscribers?)?\s+to\s+\d+\s*(?:sessions?|subscribers?)?", text, re.I)
-    target = re.search(r"\b(?:to|till|until|up\s+(?:to|till|until)|go\s+(?:up\s+)?(?:to|till|until)|target|maximum|max)\s*(\d+)\s*(?:sessions?|subscribers?)?", text, re.I)
+    target = re.search(
+        r"\b(?:maximum|max)\s*(?:sessions?|subscribers?)(?:\s+count)?\s*(?:of|=)?\s*(\d+)\b|\b(?:to|till|until|up\s+(?:to|till|until)|go\s+(?:up\s+)?(?:to|till|until)|target|maximum|max)\s*(\d+)\s*(?:sessions?|subscribers?)?",
+        text,
+        re.I,
+    )
     cpu = re.search(r"\bcpu(?:\s+safety)?(?:\s+(?:limit|threshold))?\s*(?:of|to|=)?\s*(\d+)\s*(?:%|percent)?", text, re.I)
     cpu_suffix = re.search(r"\b(\d+)\s*(?:%|percent)\s+cpu(?:\s+(?:limit|threshold))?", text, re.I)
+    cpu_percent = re.search(r"\b(\d+)\s*%", text, re.I)
     if start:
-        parameters["start_sessions"] = int(start.group(1))
+        parameters["start_sessions"] = int(next(value for value in start.groups() if value is not None))
     if target:
-        parameters["max_sessions"] = int(target.group(1))
-    if cpu or cpu_suffix:
-        parameters["cpu_limit"] = int((cpu or cpu_suffix).group(1))
+        parameters["max_sessions"] = int(next(value for value in target.groups() if value is not None))
+    if cpu or cpu_suffix or cpu_percent:
+        parameters["cpu_limit"] = int((cpu or cpu_suffix or cpu_percent).group(1))
     return parameters
 
 
 def _context_parameters(text: str, recipe: str) -> dict[str, int]:
     """Extract parameters from a follow-up after a recipe was selected."""
     if recipe == "ipoe-scale":
-        return _scale_parameters(text)
+        parameters = _scale_parameters(text)
+        if not parameters:
+            number = re.search(r"\b(\d+)\b", text)
+            if number:
+                parameters["start_sessions"] = int(number.group(1))
+        return parameters
 
     parameters: dict[str, int] = {}
     sessions = _integer(text, ("sessions?", "subscribers?"))
-    if sessions is None:
+    cycles = _integer(text, ("cycles?", "flaps?", "reconnects?")) if recipe == "ipoe-flap" else None
+    if sessions is None and cycles is None:
         number = re.search(r"\b(\d+)\b", text)
         sessions = int(number.group(1)) if number else None
     if sessions is not None:
         parameters["sessions"] = sessions
 
     if recipe == "ipoe-flap":
-        cycles = _integer(text, ("cycles?", "flaps?", "reconnects?"))
         if cycles is not None:
             parameters["cycles"] = cycles
     elif recipe == "radius-acct":
