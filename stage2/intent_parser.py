@@ -100,6 +100,10 @@ def deterministic_intent(message: str) -> dict[str, Any]:
     params = _scale_parameters(text) if recipe == "ipoe-scale" else {}
     if sessions is not None and (recipe != "ipoe-scale" or "start_sessions" not in params):
         params["start_sessions" if recipe == "ipoe-scale" else "sessions"] = sessions
+    if recipe == "ipoe-flap":
+        cycles = _integer(text, ("cycles?", "flaps?", "reconnects?"))
+        if cycles is not None:
+            params["cycles"] = cycles
     return {"topology": "osvbng", "recipe": recipe, "confidence": "medium", "parameters": params, "needs_clarification": False, "clarification_question": None, "out_of_scope": False}
 
 

@@ -28,7 +28,7 @@ RECIPE_REGISTRY = {
         "artifacts": ["Time-series CSV", "CPU and setup-rate metrics"],
     },
     "ipoe-flap": {
-        "status": "implementation_required",
+        "status": "implemented",
         "module": "recipes.ipoe_flap",
         "timeout_setting": "default_job_timeout_seconds",
         "display_name": "IPoE Flap",
