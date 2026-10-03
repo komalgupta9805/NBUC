@@ -126,10 +126,12 @@ def _wait_for_established(
     deadline = time.monotonic() + timeout_seconds
     consecutive_failures = 0
     max_consecutive_failures = 3
+    last_counters: dict[str, int] | None = None
 
     while time.monotonic() < deadline:
         try:
             counters = _get_session_counters(settings, remote_dir)
+            last_counters = counters
             consecutive_failures = 0
 
         except RuntimeError:
@@ -146,8 +148,13 @@ def _wait_for_established(
 
         time.sleep(2)
 
+    last_established = (
+        last_counters["established"] if last_counters is not None else "unavailable"
+    )
+
     raise TimeoutError(
-        f"Timed out waiting for {expected_sessions} sessions to establish."
+        f"Timed out waiting for {expected_sessions} sessions to establish. "
+        f"Last BNG Blaster established count: {last_established}."
     )
 
 def _record_event(
