@@ -8,8 +8,21 @@ const storageKey = "bng-dataset-history-v1";
 let progressCard = null;
 let datasetHistory = [];
 let capabilityMap = new Map();
+let activeResultJobId = null;
 
-function addMessage(text, role = "assistant") { const item = document.createElement("article"); item.className = role; item.textContent = text; messages.append(item); messages.scrollTop = messages.scrollHeight; }
+function addMessage(text, role = "assistant") {
+  const item = document.createElement("article");
+  item.className = role;
+
+  if (role === "assistant") {
+    item.innerHTML = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  } else {
+    item.textContent = text;
+  }
+
+  messages.append(item);
+  messages.scrollTop = messages.scrollHeight;
+}
 function setProgress(text) {
   if (!progressCard) { progressCard = document.createElement("article"); progressCard.className = "assistant progress"; progressCard.setAttribute("role", "status"); progressCard.setAttribute("aria-live", "polite"); const dot = document.createElement("span"); dot.className = "progress-dot"; dot.setAttribute("aria-hidden", "true"); const label = document.createElement("span"); label.className = "progress-text"; progressCard.append(dot, label); messages.append(progressCard); }
   progressCard.querySelector(".progress-text").textContent = text; messages.scrollTop = messages.scrollHeight;
@@ -31,16 +44,17 @@ function renderHistory() {
 }
 async function initialiseHistory() { let seed = []; try { const response = await fetch("/static/dataset-history.json", { cache: "no-store" }); if (response.ok) seed = await response.json(); } catch { /* optional seed */ } datasetHistory = mergeHistory(seed, readStoredHistory()); saveHistory(); renderHistory(); }
 function metric(label, value) { const item = document.createElement("div"), heading = document.createElement("span"), result = document.createElement("strong"); heading.textContent = label; result.textContent = value; item.append(heading, result); return item; }
-async function showDataset(jobId) { showingWorkspace = false; form.hidden = false; setActiveWorkspace("generation"); clearProgress(); setBadge(jobId); messages.replaceChildren(); setProgress("Loading dataset result…"); try { const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/result`, { cache: "no-store" }); if (!response.ok) throw new Error(`The saved result is unavailable (${response.status}).`); renderResult(await response.json(), jobId, true); } catch (error) { clearProgress(); addMessage(error.message || "Unable to load the saved dataset result."); } }
+async function showDataset(jobId) {
+  activeResultJobId = jobId;showingWorkspace = false; form.hidden = false; setActiveWorkspace("generation"); clearProgress(); setBadge(jobId); messages.replaceChildren(); setProgress("Loading dataset result…"); try { const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/result`, { cache: "no-store" }); if (!response.ok) throw new Error(`The saved result is unavailable (${response.status}).`); renderResult(await response.json(), jobId, true); } catch (error) { clearProgress(); addMessage(error.message || "Unable to load the saved dataset result."); } }
 function stageMessage(stage) { return ({ queued: "Preparing testbed…", preparing_testbed: "Preparing testbed…", running_experiment: "Running experiment…", packaging_dataset: "Packaging dataset…", finalizing_dataset: "Finalizing dataset…" })[stage] || "Preparing dataset…"; }
 async function poll(jobId) {
-  try { const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" }); if (!response.ok) throw new Error("Unable to refresh job status."); const job = await response.json(); if (["completed", "partial"].includes(job.status)) { clearProgress(); const result = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/result`, { cache: "no-store" }); if (!result.ok) throw new Error("Dataset completed, but its result could not be loaded."); const detail = await result.json(); rememberDataset(detail, jobId); renderResult(detail, jobId); return; } if (["failed", "rejected", "cancelled"].includes(job.status)) { clearProgress(); addMessage(job.reason || `Dataset generation ${job.status}.`); return; } setProgress(stageMessage(job.stage)); window.setTimeout(() => void poll(jobId), 1500); } catch (error) { setProgress(error.message || "Unable to refresh job status."); }
+  try { const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" }); if (!response.ok) throw new Error("Unable to refresh job status."); const job = await response.json(); if (["completed", "partial"].includes(job.status)) { activeResultJobId = jobId;clearProgress(); const result = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/result`, { cache: "no-store" }); if (!result.ok) throw new Error("Dataset completed, but its result could not be loaded."); const detail = await result.json(); rememberDataset(detail, jobId); renderResult(detail, jobId); return; } if (["failed", "rejected", "cancelled"].includes(job.status)) { clearProgress(); addMessage(job.reason || `Dataset generation ${job.status}.`); return; } setProgress(stageMessage(job.stage)); window.setTimeout(() => void poll(jobId), 1500); } catch (error) { setProgress(error.message || "Unable to refresh job status."); }
 }
 function addChoice(label, callback) { const button = document.createElement("button"); button.type = "button"; button.className = "choice"; button.textContent = label; button.addEventListener("click", callback); messages.append(button); }
 async function send(text) {
   activateConversation();
   addMessage(text, "user"); input.value = "";
-  try { const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, conversation_id: conversationId }) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || "Request failed."); if (data.type === "accepted") { setBadge(data.job_id); setProgress("Preparing testbed…"); void poll(data.job_id); return; } addMessage(data.assistant_message || "I could not understand that request."); if (data.type === "confirmation") { addChoice("Yes", () => void send("yes")); addChoice("No", () => void send("no")); } } catch (error) { addMessage(error.message || "Request failed."); }
+  try { const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, conversation_id: conversationId,result_job_id: activeResultJobId }) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || "Request failed."); if (data.type === "accepted") { setBadge(data.job_id); setProgress("Preparing testbed…"); void poll(data.job_id); return; } addMessage(data.assistant_message || "I could not understand that request."); if (data.type === "confirmation") { addChoice("Yes", () => void send("yes")); addChoice("No", () => void send("no")); } } catch (error) { addMessage(error.message || "Request failed."); }
 }
 function resultContext(detail) {
   const metadata = detail.metadata || {};
@@ -697,6 +711,7 @@ async function toggleRecipeSelector() {
 }
 
 function activateConversation(reset = false, includeIntro = true, clearRecipeContext = true) {
+  if (reset) activeResultJobId = null;
   if (!showingWorkspace && !reset) return;
   if (clearRecipeContext) void persistRecipeSelection().catch(() => { /* the empty chat remains usable */ });
   clearProgress();

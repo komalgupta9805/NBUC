@@ -59,14 +59,30 @@ def _scale_parameters(text: str) -> dict[str, int]:
     return parameters
 
 
-def _context_parameters(text: str, recipe: str) -> dict[str, int]:
+def _context_parameters(
+    text: str,
+    recipe: str,
+    existing_parameters: dict[str, int] | None = None,
+) -> dict[str, int]:
     """Extract parameters from a follow-up after a recipe was selected."""
+    existing_parameters = existing_parameters or {}
     if recipe == "ipoe-scale":
         parameters = _scale_parameters(text)
+
+        # For unlabeled follow-ups, fill only the unresolved Scale slots
+        # in their natural order: max_sessions, then cpu_limit.
         if not parameters:
-            number = re.search(r"\b(\d+)\b", text)
-            if number:
-                parameters["start_sessions"] = int(number.group(1))
+            numbers = [int(value) for value in re.findall(r"\b\d+\b", text)]
+
+            if "start_sessions" not in existing_parameters and numbers:
+                parameters["start_sessions"] = numbers.pop(0)
+
+            if "max_sessions" not in existing_parameters and numbers:
+                parameters["max_sessions"] = numbers.pop(0)
+
+            if "cpu_limit" not in existing_parameters and numbers:
+                parameters["cpu_limit"] = numbers.pop(0)
+
         return parameters
 
     parameters: dict[str, int] = {}
@@ -130,7 +146,9 @@ def parse_intent(
     *,
     selected_recipe: str | None = None,
     selected_topology: str | None = None,
+    selected_parameters: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    selected_parameters = selected_parameters or {}
     if not settings.groq_api_key:
         parsed = deterministic_intent(message)
     else:
@@ -154,7 +172,14 @@ def parse_intent(
             **parsed,
             "topology": selected_topology or "osvbng",
             "recipe": selected_recipe,
-            "parameters": {**parameters, **_context_parameters(message, selected_recipe)},
+             "parameters": {
+    **parameters,
+    **_context_parameters(
+        message,
+        selected_recipe,
+        {**selected_parameters, **parameters},
+    ),
+},
             "needs_clarification": False,
             "clarification_question": None,
             "out_of_scope": False,
