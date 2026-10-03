@@ -14,6 +14,11 @@ from .intent_parser import parse_intent
 from .job_manager import jobs
 from .registry import RECIPE_ALIASES, RECIPE_PARAMETERS, RECIPE_REGISTRY
 from .validator import validate
+from stage2.result_analyzer import (
+    analyze_result,
+    load_result_evidence,
+    explain_result,
+)
 
 app = FastAPI(title="BNG Dataset Generator")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
@@ -22,6 +27,7 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 class ChatRequest(BaseModel):
     conversation_id: str
     message: str
+    result_job_id: str | None = None
 
 
 class RecipeSelectionRequest(BaseModel):
@@ -216,32 +222,157 @@ def recipe_selection(payload: RecipeSelectionRequest):
     conversation.collected_parameters.clear()
     return {"selected_recipe": recipe, "selected_topology": "osvbng"}
 
+def is_result_question(message: str) -> bool:
+    text = message.lower()
 
+    question_words = (
+        "why",
+        "how",
+        "what caused",
+        "what is causing",
+        "explain",
+        "reason",
+        "cause",
+        "p50",
+        "p95",
+        "latency",
+        "slow",
+        "retry",
+        "retries",
+        "failed",
+        "failure",
+        "success rate",
+        "success percentage",
+        "success %",
+        "established",
+        "sessions",
+        "setup rate",
+        "peak active",
+        "cpu",
+        "memory",
+        "nak",
+        "discover",
+        "experiment result",
+        "results",
+                "scale point",
+        "scale points",
+        "scale progression",
+        "scaling",
+        "scaled",
+    )
+
+    return any(word in text for word in question_words)
 @app.post("/api/chat")
 def chat(payload: ChatRequest):
     conversation = conversations.get(payload.conversation_id)
     message = payload.message.strip()
+
+    # Handle confirmation
     if message.lower() in {"yes", "confirm"} and conversation.pending_intent:
-        job = jobs.start(conversation.pending_intent, conversation.history[-1]["message"] if conversation.history else "")
+        job = jobs.start(
+            conversation.pending_intent,
+            conversation.history[-1]["message"]
+            if conversation.history
+            else "",
+        )
+
+        conversation.last_job_id = job.get("job_id")
         conversation.pending_intent = None
         conversation.selected_recipe = None
         conversation.selected_topology = None
+
         conversation.collected_parameters.clear()
         if "error" in job:
-            return {"type": "rejected", "assistant_message": job["error"], "reason": job["error"]}
-        return {"type": "accepted", "assistant_message": "Preparing testbed…", "job_id": job["job_id"]}
+            return {
+                "type": "rejected",
+                "assistant_message": job["error"],
+                "reason": job["error"],
+            }
+
+        return {
+            "type": "accepted",
+            "assistant_message": "Preparing testbed…",
+            "job_id": job["job_id"],
+        }
+
+    # Handle cancellation
     if message.lower() in {"no", "cancel"} and conversation.pending_intent:
         conversation.pending_intent = None
         conversation.selected_recipe = None
         conversation.selected_topology = None
         conversation.collected_parameters.clear()
         return {"type": "rejected", "assistant_message": "Okay — I did not start an experiment.", "reason": "Cancelled before execution."}
+        # Handle questions about experiment results
+    if is_result_question(message):
+        job = None
+
+        # Explicit result job from the UI
+        if payload.result_job_id:
+            job = jobs.get(payload.result_job_id)
+
+        # Otherwise use the job associated with this conversation
+        if job is None and conversation.last_job_id:
+            job = jobs.get(conversation.last_job_id)
+
+        # If there is no conversation job, find the latest supported
+        # completed/failed experiment with the required artifacts
+        if job is None:
+            candidate_jobs = [
+                item
+                for item in jobs.jobs.values()
+                if item.get("status") in {"completed", "failed"}
+            ]
+
+            candidate_jobs.sort(
+                key=lambda item: item.get("job_id", ""),
+                reverse=True,
+            )
+
+            for candidate in candidate_jobs:
+                recipe = candidate.get("intent", {}).get("recipe")
+                artifacts = candidate["directory"] / "artifacts"
+
+                supported = (
+                    recipe == "ipoe-bind"
+                    and (artifacts / "session_dataset.csv").is_file()
+                    and (artifacts / "blaster-report.json").is_file()
+                ) or (
+                    recipe == "ipoe-flap"
+                    and (artifacts / "session_timeline.csv").is_file()
+                    and (artifacts / "counters.csv").is_file()
+                ) or (
+                    recipe == "ipoe-scale"
+                    and (artifacts / "scale_timeseries.csv").is_file()
+                    and (artifacts / "report.json").is_file()
+                )
+
+                if supported:
+                    job = candidate
+                    break
+
+        if job:
+            evidence = load_result_evidence(job)
+            analysis = analyze_result(evidence)
+
+            answer = explain_result(
+                evidence,
+                analysis,
+                settings.groq_api_key,
+                message,
+            )
+
+            return {
+                "type": "analysis",
+                "assistant_message": answer,
+            }
+
     conversation.history.append({"message": message})
     raw = parse_intent(
-        message,
-        selected_recipe=conversation.selected_recipe,
-        selected_topology=conversation.selected_topology,
-    )
+    message,
+    selected_recipe=conversation.selected_recipe,
+    selected_topology=conversation.selected_topology,
+    selected_parameters=conversation.collected_parameters,
+)
     recipe = raw.get("recipe")
     if isinstance(recipe, str):
         recipe = RECIPE_ALIASES.get(recipe, recipe)
@@ -277,13 +408,14 @@ def chat(payload: ChatRequest):
     response = {"type": result.kind, "assistant_message": result.message}
     if result.options:
         response["options"] = result.options
+
     if result.intent:
         conversation.pending_intent = result.intent
         conversation.selected_recipe = result.intent["recipe"]
         conversation.selected_topology = result.intent["topology"]
         response["intent"] = result.intent
-    return response
 
+    return response
 
 @app.get("/api/jobs/{job_id}")
 def job(job_id: str):
