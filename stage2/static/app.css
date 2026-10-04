@@ -58,3 +58,67 @@ form button { padding: 0 20px; border: 1px solid var(--accent); border-radius: 1
 form button:hover, form button:focus-visible { border-color: var(--accent-hover); background: var(--accent-hover); outline: none; }
 @media (max-width: 760px) { body { padding: 0; } .app-shell { height: 100vh; border: 0; border-radius: 0; box-shadow: none; } .sidebar { display: none; } header { padding: 15px 19px; } #messages, form { padding-right: 19px; padding-left: 19px; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 450px) { .window-dots { display: none; } .page-title { font-size: 18px; } .page-title span { display: none; } .active-badge { max-width: 125px; } .metrics { grid-template-columns: 1fr; } article { max-width: 92%; } }
+.subscriber-chart-panel {
+  margin-top: 24px;
+}
+
+.subscriber-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.subscriber-chart-header h2 {
+  margin: 0;
+}
+
+.subscriber-chart-header p {
+  margin: 5px 0 0;
+  opacity: 0.65;
+  font-size: 13px;
+}
+
+.live-indicator {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.subscriber-chart {
+  width: 100%;
+  height: 280px;
+  margin-top: 18px;
+}
+
+.subscriber-chart svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.chart-grid {
+  stroke: #999;
+  stroke-opacity: 0.25;
+  stroke-width: 1;
+}
+
+.chart-axis-label {
+  fill: currentColor;
+  opacity: 0.55;
+  font-size: 11px;
+}
+
+.subscriber-line {
+  stroke: #111;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.subscriber-chart-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.7;
+}

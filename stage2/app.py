@@ -76,6 +76,20 @@ def _missing_parameter_question(recipe: str, missing: list[str]) -> str:
 def index():
     return FileResponse(ROOT / "templates" / "index.html")
 
+def _testbed_ssh_base() -> list[str]:
+    """Build the SSH command used to access the remote testbed."""
+    key = Path(settings.testbed_ssh_key_path)
+
+    return [
+        "ssh",
+        "-i",
+        str(key),
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "BatchMode=yes",
+        f"{settings.testbed_user}@{settings.testbed_host}",
+    ]
 
 @app.get("/api/health")
 def health():
@@ -95,18 +109,7 @@ def health():
     }
 
     if testbed_configured:
-        key = Path(settings.testbed_ssh_key_path)
-
-        ssh_base = [
-            "ssh",
-            "-i",
-            str(key),
-            "-o",
-            "IdentitiesOnly=yes",
-            "-o",
-            "BatchMode=yes",
-            f"{settings.testbed_user}@{settings.testbed_host}",
-        ]
+        ssh_base = _testbed_ssh_base()
 
         remote_command = (
             "printf 'bng='; "
@@ -153,6 +156,78 @@ def health():
     }
 
 
+@app.get("/api/metrics/subscribers")
+def subscriber_metrics():
+    """Return recent subscriber-session time series from Prometheus."""
+    testbed_configured = bool(
+        settings.testbed_host
+        and settings.testbed_user
+        and settings.testbed_ssh_key_path
+    )
+
+    if not testbed_configured:
+        raise HTTPException(503, "Testbed is not configured")
+
+    ssh_base = _testbed_ssh_base()
+
+    remote_command = (
+        "END=$(date +%s); "
+        "START=$((END - 600)); "
+        "curl -fsS -G 'http://localhost:9090/api/v1/query_range' "
+        "--data-urlencode 'query=osvbng_subscriber_sessions_active' "
+        "--data-urlencode \"start=$START\" "
+        "--data-urlencode \"end=$END\" "
+        "--data-urlencode 'step=5s'"
+    )
+
+    try:
+        result = subprocess.run(
+            ssh_base + [remote_command],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(503, "Unable to reach the testbed") from exc
+
+    if result.returncode != 0:
+        raise HTTPException(
+            503,
+            f"Unable to query Prometheus: {result.stderr.strip()}",
+        )
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(502, "Prometheus returned invalid JSON") from exc
+
+    if payload.get("status") != "success":
+        raise HTTPException(
+            502,
+            payload.get("error", "Prometheus query failed"),
+        )
+
+    results = payload.get("data", {}).get("result", [])
+
+    if not results:
+        return {
+            "metric": "osvbng_subscriber_sessions_active",
+            "values": [],
+        }
+
+    values = results[0].get("values", [])
+
+    return {
+        "metric": "osvbng_subscriber_sessions_active",
+        "values": [
+            {
+                "timestamp": timestamp,
+                "subscribers": float(value),
+            }
+            for timestamp, value in values
+        ],
+    }
 @app.get("/api/capabilities")
 def capabilities():
     """Read-only frontend capabilities for implemented recipes."""

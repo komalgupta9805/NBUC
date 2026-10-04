@@ -9,8 +9,14 @@ let progressCard = null;
 let datasetHistory = [];
 let capabilityMap = new Map();
 let activeResultJobId = null;
+let chatHistory = [];
 
 function addMessage(text, role = "assistant") {
+    chatHistory.push({ text, role });
+
+  if (chatHistory.length > 5) {
+    chatHistory.shift();
+  }
   const item = document.createElement("article");
   item.className = role;
 
@@ -25,7 +31,9 @@ function addMessage(text, role = "assistant") {
 }
 function setProgress(text) {
   if (!progressCard) { progressCard = document.createElement("article"); progressCard.className = "assistant progress"; progressCard.setAttribute("role", "status"); progressCard.setAttribute("aria-live", "polite"); const dot = document.createElement("span"); dot.className = "progress-dot"; dot.setAttribute("aria-hidden", "true"); const label = document.createElement("span"); label.className = "progress-text"; progressCard.append(dot, label); messages.append(progressCard); }
-  progressCard.querySelector(".progress-text").textContent = text; messages.scrollTop = messages.scrollHeight;
+  progressCard.querySelector(".progress-text").textContent = text; if (!showingWorkspace) {
+  messages.scrollTop = messages.scrollHeight;
+}
 }
 function clearProgress() { progressCard?.remove(); progressCard = null; }
 function setBadge(jobId) { if (badge) badge.textContent = jobId || "Ready"; }
@@ -365,6 +373,37 @@ function renderDashboard(data) {
   metric("Testbed", testbedConfigured ? "Configured" : "Not configured")
 );
 shell.append(cards);
+const chartPanel = workspaceElement("section", "subscriber-chart-panel");
+
+chartPanel.innerHTML = `
+    <div class="subscriber-chart-header">
+      <div>
+        <h2>Subscriber Sessions Over Time</h2>
+        <p>Live active subscriber sessions from the BNG testbed</p>
+      </div>
+      <span class="live-indicator">● LIVE</span>
+    </div>
+
+    <div class="subscriber-chart">
+      <svg
+        id="subscriber-chart-svg"
+        viewBox="0 0 900 280"
+        preserveAspectRatio="none"
+        style="overflow: visible;"
+      >
+        <text x="450" y="140" text-anchor="middle">
+          Waiting for subscriber data…
+        </text>
+      </svg>
+    </div>
+
+    <div class="subscriber-chart-footer">
+      <span id="subscriber-chart-current">Current: —</span>
+      <span id="subscriber-chart-maximum">Max: —</span>
+    </div>
+  `;
+
+shell.append(chartPanel);
 shell.append(
   workspaceElement(
     "p",
@@ -727,6 +766,7 @@ function activateConversation(reset = false, includeIntro = true, clearRecipeCon
 let workspaceRequestId = 0;
 async function showWorkspace(view) {
   const requestId = ++workspaceRequestId;
+  stopSubscriberChartPolling();
   if (view === "generation") { activateConversation(true); return; }
   showingWorkspace = true;
   hideRecipeSelector();
@@ -747,6 +787,9 @@ async function showWorkspace(view) {
   testbed: renderTestbed
 }[view];
     messages.replaceChildren(renderer(data));
+    if (view === "dashboard") {
+  startSubscriberChartPolling();
+}
   } catch (error) {
     messages.replaceChildren(workspaceElement("p", "workspace-empty", error.message || "Workspace data is unavailable."));
   }
@@ -756,4 +799,165 @@ document.querySelector("#new-request").addEventListener("click", () => activateC
 document.querySelector("#recipes-toggle").addEventListener("click", toggleRecipeSelector);
 document.querySelectorAll(".workspace-nav:not(#recipes-toggle)").forEach((button) => button.addEventListener("click", () => void showWorkspace(button.dataset.view)));
 void initialiseHistory();
+let subscriberChartTimer = null;
+
+async function loadSubscriberChart() {
+  const svg = document.querySelector("#subscriber-chart-svg");
+
+  if (!svg) return;
+
+  try {
+    const response = await fetch("/api/metrics/subscribers", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    drawSubscriberChart(data.values || []);
+  } catch (error) {
+    console.error("Failed to load subscriber metrics:", error);
+  }
+}
+
+
+function drawSubscriberChart(values) {
+  const svg = document.querySelector("#subscriber-chart-svg");
+
+  if (!svg) return;
+
+  const currentElement = document.querySelector("#subscriber-chart-current");
+  const maximumElement = document.querySelector("#subscriber-chart-maximum");
+
+  if (!values.length) {
+    svg.innerHTML = `
+      <text x="450" y="140" text-anchor="middle">
+        No subscriber data available
+      </text>
+    `;
+
+    if (currentElement) currentElement.textContent = "Current: —";
+    if (maximumElement) maximumElement.textContent = "Max: —";
+
+    return;
+  }
+
+  const width = 900;
+  const height = 280;
+
+  const paddingLeft = 55;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 35;
+
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  const timestamps = values.map((point) => Number(point.timestamp));
+  const subscribers = values.map((point) => Number(point.subscribers));
+
+  const minTime = Math.min(...timestamps);
+  const maxTime = Math.max(...timestamps);
+
+  const maximum = Math.max(...subscribers, 1);
+
+  const x = (timestamp) => {
+    if (maxTime === minTime) {
+      return paddingLeft;
+    }
+
+    return (
+      paddingLeft +
+      ((timestamp - minTime) / (maxTime - minTime)) * chartWidth
+    );
+  };
+
+  const y = (subscriberCount) => {
+    return (
+      paddingTop +
+      chartHeight -
+      (subscriberCount / maximum) * chartHeight
+    );
+  };
+
+  const points = values
+    .map(
+      (point) =>
+        `${x(Number(point.timestamp))},${y(Number(point.subscribers))}`
+    )
+    .join(" ");
+
+  const gridLines = [0, 0.25, 0.5, 0.75, 1]
+    .map((level) => {
+      const yPosition =
+        paddingTop + chartHeight * (1 - level);
+
+      const label = Math.round(maximum * level);
+
+      return `
+        <line
+          x1="${paddingLeft}"
+          y1="${yPosition}"
+          x2="${width - paddingRight}"
+          y2="${yPosition}"
+          class="chart-grid"
+        />
+
+        <text
+          x="${paddingLeft - 10}"
+          y="${yPosition + 4}"
+          text-anchor="end"
+          class="chart-axis-label"
+        >
+          ${label}
+        </text>
+      `;
+    })
+    .join("");
+
+  svg.innerHTML = `
+    ${gridLines}
+
+    <polyline
+      points="${points}"
+      class="subscriber-line"
+      fill="none"
+    />
+  `;
+
+  const current = subscribers[subscribers.length - 1];
+  const maxValue = Math.max(...subscribers);
+
+  if (currentElement) {
+    currentElement.textContent = `Current: ${current}`;
+  }
+
+  if (maximumElement) {
+    maximumElement.textContent = `Max: ${maxValue}`;
+  }
+}
+
+
+function startSubscriberChartPolling() {
+  if (subscriberChartTimer) {
+    clearInterval(subscriberChartTimer);
+  }
+
+  void loadSubscriberChart();
+
+  subscriberChartTimer = window.setInterval(() => {
+    void loadSubscriberChart();
+  }, 5000);
+}
+
+
+function stopSubscriberChartPolling() {
+  if (subscriberChartTimer) {
+    clearInterval(subscriberChartTimer);
+    subscriberChartTimer = null;
+  }
+}
 
