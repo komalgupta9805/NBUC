@@ -27,7 +27,7 @@ def validate_remote_project(settings: Settings, log_path: Path | None = None) ->
         raise RuntimeError("TESTBED_PROJECT_PATH must be the remote project root.")
     script = f"{settings.testbed_project_path}/experiment-a/run_experiment_a.sh"
     command = _ssh_base(settings) + [f"test -x {shlex.quote(script)}"]
-    checked = subprocess.run(command, capture_output=True, text=True, timeout=15, check=False)
+    checked = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
     if log_path:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("a", encoding="utf-8") as handle:
