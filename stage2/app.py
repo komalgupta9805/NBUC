@@ -226,26 +226,41 @@ def recipe_selection(payload: RecipeSelectionRequest):
     return {"selected_recipe": recipe, "selected_topology": "osvbng"}
 
 def is_result_question(message: str) -> bool:
-    text = message.lower()
+    """Route only clear questions about an already-run experiment to analysis."""
+    text = message.lower().strip()
+    if text.startswith(("generate", "run", "start", "create", "make")):
+        return False
 
-    question_words = (
-        "why",
+    analysis_prefixes = (
+        "why did",
+        "why was",
+        "why were",
         "what caused",
         "what is causing",
+        "what was",
+        "what were",
         "explain",
-        "reason",
-        "cause",
+        "show me",
+        "compare",
+        "how many",
+        "did all",
+        "were all",
+        "was there",
+        "is there",
+    )
+    if not text.startswith(analysis_prefixes):
+        return False
+
+    result_topics = (
+        "stop",
+        "result",
         "p50",
         "p95",
         "latency",
-        "slow",
         "retry",
-        "retries",
-        "failed",
         "failure",
+        "failed",
         "success rate",
-        "success percentage",
-        "success %",
         "established",
         "setup rate",
         "peak active",
@@ -253,34 +268,15 @@ def is_result_question(message: str) -> bool:
         "memory",
         "nak",
         "discover",
-        "experiment result",
-        "results",
-                "scale point",
-        "scale points",
+        "scale point",
         "scale progression",
-        "scaling",
-        "scaled",
-        "as the number of sessions increased",
-"as sessions increased",
-"as session count increased",
-"how many sessions were established",
-"how many sessions established",
-"number of sessions established",
- "did all sessions reconnect",
-"did all requested sessions reconnect",
-"were all sessions reconnected",
-"were all requested sessions reconnected",
-"did all sessions reconnect after each flap",
-"was the reconnect behavior consistent across cycles",
-"what does the reconnect time tell us",
-"were there any signs of session loss after reconnection",
-"what evidence supports the conclusion that the flap test was successful",
-"were there any signs of instability",
-"was there any evidence of performance degradation as the load increased",
-"is there evidence of a bottleneck",
+        "reconnect",
+        "session loss",
+        "instability",
+        "bottleneck",
+        "performance degradation",
     )
-
-    return any(word in text for word in question_words)
+    return any(topic in text for topic in result_topics)
 @app.post("/api/chat")
 def chat(payload: ChatRequest):
     conversation = conversations.get(payload.conversation_id)
@@ -386,12 +382,13 @@ def chat(payload: ChatRequest):
             }
 
     conversation.history.append({"message": message})
-    raw = parse_intent(
-    message,
-    selected_recipe=conversation.selected_recipe,
-    selected_topology=conversation.selected_topology,
-    selected_parameters=conversation.collected_parameters,
-)
+    parse_context = {
+        "selected_recipe": conversation.selected_recipe,
+        "selected_topology": conversation.selected_topology,
+    }
+    if conversation.collected_parameters:
+        parse_context["selected_parameters"] = conversation.collected_parameters
+    raw = parse_intent(message, **parse_context)
     recipe = raw.get("recipe")
     if isinstance(recipe, str):
         recipe = RECIPE_ALIASES.get(recipe, recipe)

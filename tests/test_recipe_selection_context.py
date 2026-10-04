@@ -9,6 +9,7 @@ from stage2.app import (
     ChatRequest,
     RecipeSelectionRequest,
     chat,
+    is_result_question,
     recipe_selection,
 )
 from stage2.conversation import conversations
@@ -78,6 +79,39 @@ class RecipeSelectionContextTests(unittest.TestCase):
         self.assertIn("how many sessions", first["assistant_message"].lower())
         self.assertEqual(final["type"], "confirm")
         self.assertEqual(final["intent"]["parameters"]["sessions"], 50)
+
+    def test_complete_bind_request_uses_normal_generation_flow(self) -> None:
+        conversation_id = f"test-bind-complete-{uuid.uuid4()}"
+        with patch("stage2.intent_parser.settings", SimpleNamespace(groq_api_key=None)):
+            response = chat(ChatRequest(
+                conversation_id=conversation_id,
+                message="Generate IPoE Bind with 50 sessions.",
+            ))
+        self.assertEqual(response["type"], "confirm")
+        self.assertEqual(response["intent"]["parameters"]["sessions"], 50)
+
+    def test_explicit_result_questions_route_to_analysis(self) -> None:
+        conversation_id = f"test-result-routing-{uuid.uuid4()}"
+        conversations.get(conversation_id).last_job_id = "result-job"
+        job = {"job_id": "result-job"}
+        with (
+            patch("stage2.app.jobs.get", return_value=job),
+            patch("stage2.app.load_result_evidence", return_value={}),
+            patch("stage2.app.analyze_result", return_value={}),
+            patch("stage2.app.explain_result", return_value="analysis") as explain,
+        ):
+            for message in (
+                "Why did the scale test stop?",
+                "What caused the failures?",
+                "What was the p95 latency?",
+            ):
+                response = chat(ChatRequest(conversation_id=conversation_id, message=message))
+                self.assertEqual(response["type"], "analysis")
+        self.assertEqual(explain.call_count, 3)
+
+    def test_generation_terms_alone_are_not_result_questions(self) -> None:
+        self.assertFalse(is_result_question("Generate IPoE Scale starting from 10 sessions, go till 60 sessions, CPU limit 80%."))
+        self.assertFalse(is_result_question("Generate IPoE Bind with 50 sessions."))
 
     def test_flap_preserves_sessions_while_collecting_cycles(self) -> None:
         conversation_id = f"test-flap-slots-{uuid.uuid4()}"
