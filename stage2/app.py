@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
@@ -314,14 +315,20 @@ def is_result_question(message: str) -> bool:
         "what is causing",
         "what was",
         "what were",
+        "what happened",
         "explain",
         "show me",
         "compare",
+        "summarize",
+        "summarise",
         "how many",
-        "did all",
-        "were all",
-        "was there",
+        "did ",
+        "was ",
+        "were ",
+        "has ",
+        "have ",
         "is there",
+        "are there",
     )
     if not text.startswith(analysis_prefixes):
         return False
@@ -350,12 +357,103 @@ def is_result_question(message: str) -> bool:
         "instability",
         "bottleneck",
         "performance degradation",
+        "flap",
+        "experiment",
+        "complete",
+        "completed",
+        "successful",
+        "successfully",
+        "summary",
+        "disconnect",
+        "disconnected",
+        "reconnected",
+        "restore",
+        "restored",
+        "cycle",
+        "run",
+        "timeline",
     )
     return any(topic in text for topic in result_topics)
+
+FUTURE_SCOPE_5G_MESSAGE = (
+    "5G dataset generation is identified as an extension use case and is part of the "
+    "planned future scope. The current implementation supports the BNG/IPoE testbed "
+    "and its available recipes."
+)
+
+CAPABILITIES_MESSAGE = (
+    "I can generate datasets for **IPoE Bind**, **IPoE Scale**, and **IPoE Flap**. "
+    "You can describe the experiment naturally—for example, "
+    "\"generate a dual-stack dataset for 20 subscribers\", "
+    "\"flap 50 subscribers for 2 cycles\", or "
+    "\"scale from 50 to 300 sessions with an 80% CPU limit\"."
+)
+
+RADIUS_SCOPE_MESSAGE = (
+    "RADIUS Accounting is already identified in the framework as an extension recipe, "
+    "but dataset execution for it is not enabled in the current demo. "
+    "The current executable workflows are IPoE Bind, IPoE Scale, and IPoE Flap."
+)
+
+NETWORK_EXTENSION_MESSAGE = (
+    "This use case is outside the currently implemented BNG/IPoE dataset-generation "
+    "scope, but it can be considered as an extension of the framework in future. "
+    "The current implementation supports IPoE Bind, IPoE Scale, and IPoE Flap."
+)
+
+
+def _special_conversation_response(message: str) -> str | None:
+    """Handle safe conversational and future-scope cases before recipe execution."""
+    text = message.lower().strip()
+
+    if re.search(r"\b(?:5g|5g core|nr|gnb|amf|smf|upf)\b", text):
+        return FUTURE_SCOPE_5G_MESSAGE
+
+    if re.search(r"\b(?:radius|accounting|acct)\b", text):
+        return RADIUS_SCOPE_MESSAGE
+
+    # Recognized networking domains that are valid extension ideas but are not
+    # executable recipes in the current BNG/IPoE demo.
+    if re.search(
+        r"\b(?:4g|lte|volte|wifi|wi-fi|wlan|mpls|sd-wan|sdwan|docsis|"
+        r"pon|gpon|xgs-pon|xgspon|dsl|adsl|vdsl)\b",
+        text,
+    ):
+        return NETWORK_EXTENSION_MESSAGE
+
+    if re.fullmatch(
+        r"(?:hi|hello|hey|good morning|good afternoon|good evening)[!. ]*",
+        text,
+    ):
+        return (
+            "Hello! Describe the BNG/IPoE dataset you need, or ask what experiments "
+            "I can generate."
+        )
+
+    capability_patterns = (
+        r"\bwhat can you do\b",
+        r"\bwhat (?:can|could) you generate\b",
+        r"\bwhat (?:experiments?|datasets?|recipes?) (?:do you support|can you generate|are available)\b",
+        r"\bshow (?:me )?(?:the )?(?:available|supported) (?:experiments?|datasets?|recipes?)\b",
+        r"\bhelp\b",
+    )
+    if any(re.search(pattern, text) for pattern in capability_patterns):
+        return CAPABILITIES_MESSAGE
+
+    return None
+
+
 @app.post("/api/chat")
 def chat(payload: ChatRequest):
     conversation = conversations.get(payload.conversation_id)
     message = payload.message.strip()
+
+    special_response = _special_conversation_response(message)
+    if special_response:
+        return {
+            "type": "informational",
+            "assistant_message": special_response,
+        }
 
     # Handle confirmation
     if message.lower() in {"yes", "confirm"} and conversation.pending_intent:

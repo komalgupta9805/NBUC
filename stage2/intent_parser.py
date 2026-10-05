@@ -10,11 +10,34 @@ from typing import Any
 from .config import settings
 
 
-SYSTEM_PROMPT = """Return only JSON matching this shape: {"topology":"osvbng"|null,
+SYSTEM_PROMPT = """You are the intent parser for a BNG dataset-generation assistant.
+Return only JSON matching this shape:
+{"topology":"osvbng"|null,
 "recipe":"ipoe-bind"|"ipoe-scale"|"ipoe-flap"|"radius-acct"|null,
-"confidence":"high"|"medium"|"low", "parameters":{},
-"needs_clarification":boolean,"clarification_question":string|null,
-"out_of_scope":boolean}. Never return commands or prose."""
+"confidence":"high"|"medium"|"low",
+"parameters":{},
+"needs_clarification":boolean,
+"clarification_question":string|null,
+"out_of_scope":boolean}.
+
+Interpret natural wording, not only exact recipe names:
+- ipoe-bind: establish/bring up/create dual-stack IPoE subscriber sessions.
+- ipoe-flap: disconnect/reconnect, flap, recovery or resilience testing.
+- ipoe-scale: scale/load/sweep subscriber counts toward a target with a CPU limit.
+- radius-acct: RADIUS/accounting requests.
+
+Parameter meanings:
+- ipoe-bind: sessions, offered_rate, duration.
+- ipoe-flap: sessions, cycles.
+- ipoe-scale: start_sessions, max_sessions, cpu_limit.
+- radius-acct: sessions, capture_duration.
+
+Words such as users, clients or subscribers may refer to subscriber sessions.
+For phrases such as "twice", "two times" or "3 reconnects", infer flap cycles.
+If the request is about BNG/IPoE but the experiment type is ambiguous, set
+needs_clarification=true instead of guessing.
+If it is outside the current BNG/IPoE scope, set out_of_scope=true.
+Never return commands or prose."""
 
 
 def _integer(text: str, names: tuple[str, ...]) -> int | None:
@@ -27,8 +50,22 @@ def _integer(text: str, names: tuple[str, ...]) -> int | None:
     if match:
         return int(match.group(1))
     if any(name.startswith(("sessions", "subscribers")) for name in names):
-        match = re.search(r"\b(\d+)\s+(?:ipoe|subscribers?|sessions?)\b", text, re.I)
+        match = re.search(r"\b(\d+)\s+(?:ipoe|subscribers?|sessions?|users?|clients?)\b", text, re.I)
         return int(match.group(1)) if match else None
+    return None
+
+
+def _word_number(text: str) -> int | None:
+    """Return a small spoken number commonly used in conversational requests."""
+    words = {
+        "one": 1, "once": 1,
+        "two": 2, "twice": 2,
+        "three": 3, "thrice": 3,
+        "four": 4, "five": 5,
+    }
+    for word, value in words.items():
+        if re.search(rf"\b{word}\b", text, re.I):
+            return value
     return None
 
 
@@ -86,8 +123,10 @@ def _context_parameters(
         return parameters
 
     parameters: dict[str, int] = {}
-    sessions = _integer(text, ("sessions?", "subscribers?"))
+    sessions = _integer(text, ("sessions?", "subscribers?", "users?", "clients?"))
     cycles = _integer(text, ("cycles?", "flaps?", "reconnects?")) if recipe == "ipoe-flap" else None
+    if recipe == "ipoe-flap" and cycles is None and re.search(r"\b(?:cycle|flap|reconnect|disconnect|time|times)\b", text, re.I):
+        cycles = _word_number(text)
     if sessions is None and cycles is None:
         number = re.search(r"\b(\d+)\b", text)
         if number:
@@ -145,6 +184,11 @@ def deterministic_intent(message: str) -> dict[str, Any]:
         "dhcp",
         "subscriber",
         "session",
+        "user",
+        "client",
+        "recovery",
+        "resilience",
+        "load",
         "radius",
         "flap",
         "cycle",
@@ -157,20 +201,22 @@ def deterministic_intent(message: str) -> dict[str, Any]:
         return {"topology": None, "recipe": None, "confidence": "high", "parameters": {}, "needs_clarification": False, "clarification_question": None, "out_of_scope": True}
     if any(token in text for token in ("radius", "accounting", "acct")):
         recipe = "radius-acct"
-    elif any(token in text for token in ("flap", "cycle", "cycles", "reconnect", "disconnect")):
+    elif any(token in text for token in ("flap", "cycle", "cycles", "reconnect", "disconnect", "recovery", "resilience")):
         recipe = "ipoe-flap"
-    elif any(token in text for token in ("scale", "how many", "setup rate", "sweep")):
+    elif any(token in text for token in ("scale", "scaling", "load", "setup rate", "sweep", "ramp")):
         recipe = "ipoe-scale"
-    elif any(token in text for token in ("bind", "dual-stack", "dual stack", "session")):
+    elif any(token in text for token in ("bind", "dual-stack", "dual stack", "bring up", "establish", "session")):
         recipe = "ipoe-bind"
     else:
         return {"topology": "osvbng", "recipe": None, "confidence": "low", "parameters": {}, "needs_clarification": True, "clarification_question": "Which experiment do you need: session binding, scaling, disconnect/reconnect, or RADIUS accounting?", "out_of_scope": False}
-    sessions = _integer(text, ("sessions?", "subscribers?"))
+    sessions = _integer(text, ("sessions?", "subscribers?", "users?", "clients?"))
     params = _scale_parameters(text) if recipe == "ipoe-scale" else {}
     if sessions is not None and (recipe != "ipoe-scale" or "start_sessions" not in params):
         params["start_sessions" if recipe == "ipoe-scale" else "sessions"] = sessions
     if recipe == "ipoe-flap":
         cycles = _integer(text, ("cycles?", "flaps?", "reconnects?"))
+        if cycles is None and re.search(r"\b(?:cycle|flap|reconnect|disconnect|time|times)\b", text, re.I):
+            cycles = _word_number(text)
         if cycles is not None:
             params["cycles"] = cycles
     return {"topology": "osvbng", "recipe": recipe, "confidence": "medium", "parameters": params, "needs_clarification": False, "clarification_question": None, "out_of_scope": False}
