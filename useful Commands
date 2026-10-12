@@ -2,3 +2,4 @@
 NBUC-main\NBUC-main\stage2>pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-stage2.txt
 NBUC-main\NBUC-main>pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org groq
 NBUC-main>python -m uvicorn stage2.app:app --reload --port 5000
+from any browser (chrome, edge or firefox), do: http://127.0.0.1:5000/
