@@ -45,8 +45,8 @@ The application reaches the remote testbed over SSH, rather than running directl
 | Recipe       | Purpose                                                                        | Status                                |
 | ------------ | ------------------------------------------------------------------------------ | ------------------------------------- |
 | `ipoe-bind`  | Dual-stack IPoE session establishment dataset                                  | tested end-to-end on the real testbed |
-| `ipoe-scale` | Session setup-rate scaling, swept toward a target load with a CPU safety limit |
-| `ipoe-flap`  | Session disconnect/reconnect behaviour                                         |
+| `ipoe-scale` | Session setup-rate scaling, swept toward a target load with a CPU safety limit | tested on the real testbed with CPU safety limits |
+| `ipoe-flap`  | Session disconnect/reconnect behaviour                                         | tested end-to-end on the real testbed across multiple flap cycles|
 
 Any request that doesn't map to the `osvbng` topology or one of the three implemented recipes above is rejected with a clear, specific reason — the system never guesses or fabricates a result for something it doesn't support. Supported session counts: **10 and above** for implemented recipes (subject to the configured hard cap). Scale additionally accepts a CPU limit of **50–95%**;
 
